@@ -20,25 +20,31 @@ import './openrefine_api';
 let token;
 
 beforeEach(() => {
-	cy.server({
-		ignore: (xhr) => {
-			// Hide XHR Requests from log, OpenRefine is making too many XHR requests, it's polluting the test runner
-			return true;
-		},
-	});
+  cy.server({
+    ignore: (xhr) => {
+      // Hide XHR Requests from log, OpenRefine is making too many XHR requests, it's polluting the test runner
+      return true;
+    },
+  });
 
-	cy.wrap(token, { log: false }).as('token');
-	cy.wrap(token, { log: false }).as('deletetoken');
-	cy.wrap([], { log: false }).as('loadedProjectIds');
+  cy.wrap(token, { log: false }).as('token');
+  cy.wrap(token, { log: false }).as('deletetoken');
+  cy.wrap([], { log: false }).as('loadedProjectIds');
 });
 
 afterEach(() => {
-	cy.cleanupProjects();
+  // DISABLE_PROJECT_CLEANUP is used to disable projects deletion
+  // Mostly used in CI/CD for performances
+  if(parseInt(Cypress.env('DISABLE_PROJECT_CLEANUP')) != 1){
+    cy.cleanupProjects();
+  }
 });
 
 before(() => {
-	cy.request('http://127.0.0.1:3333/command/core/get-csrf-token').then((response) => {
-		// store one unique token for block of runs
-		token = response.body.token;
-	});
+  cy.request(
+    Cypress.env('OPENREFINE_URL') + '/command/core/get-csrf-token'
+  ).then((response) => {
+    // store one unique token for block of runs
+    token = response.body.token;
+  });
 });
