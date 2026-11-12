@@ -34,44 +34,64 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.google.refine.operations.cell;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.Engine.Mode;
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.browsing.RowVisitor;
 import com.google.refine.expr.ExpressionUtils;
+import com.google.refine.model.AbstractOperation;
 import com.google.refine.model.Cell;
 import com.google.refine.model.Column;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Row;
 import com.google.refine.model.changes.CellChange;
 import com.google.refine.operations.EngineDependentMassCellOperation;
+import com.google.refine.operations.OperationDescription;
 
 public class FillDownOperation extends EngineDependentMassCellOperation {
-    
+
     @JsonCreator
     public FillDownOperation(
-            @JsonProperty("engineConfig")
-            EngineConfig engineConfig,
-            @JsonProperty("columnName")
-            String columnName
-        ) {
+            @JsonProperty("engineConfig") EngineConfig engineConfig,
+            @JsonProperty("columnName") String columnName) {
         super(engineConfig, columnName, true);
     }
 
     @Override
     protected String getBriefDescription(Project project) {
-        return "Fill down cells in column " + _columnName;
+        return OperationDescription.cell_fill_down_brief(_columnName);
     }
 
     @Override
     protected String createDescription(Column column,
             List<CellChange> cellChanges) {
-        
-        return "Fill down " + cellChanges.size() + 
-            " cells in column " + column.getName();
+
+        return OperationDescription.cell_fill_down_desc(cellChanges.size(), column.getName());
+    }
+
+    @Override
+    public Optional<Set<String>> getColumnDependenciesWithoutEngine() {
+        return Optional.of(Set.of(_columnName));
+    }
+
+    @Override
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.modifySingleColumn(_columnName));
+    }
+
+    @Override
+    public AbstractOperation renameColumns(Map<String, String> newColumnNames) {
+        return new FillDownOperation(
+                getEngineConfig().renameColumnDependencies(newColumnNames),
+                newColumnNames.getOrDefault(_columnName, _columnName));
     }
 
     @Override
@@ -79,32 +99,33 @@ public class FillDownOperation extends EngineDependentMassCellOperation {
         Column column = project.columnModel.getColumnByName(_columnName);
         Engine engine = createEngine(project);
         Mode engineMode = engine.getMode();
-        
+
         return new RowVisitor() {
-            int                 cellIndex;
-            int 			    keyCellIndex;
-            List<CellChange>    cellChanges;
-            Cell                previousCell;
-            Mode                engineMode;
-            
+
+            int cellIndex;
+            int keyCellIndex;
+            List<CellChange> cellChanges;
+            Cell previousCell;
+            Mode engineMode;
+
             public RowVisitor init(int cellIndex, List<CellChange> cellChanges, Mode engineMode) {
                 this.cellIndex = cellIndex;
                 this.cellChanges = cellChanges;
                 this.engineMode = engineMode;
                 return this;
             }
-            
+
             @Override
             public void start(Project project) {
                 keyCellIndex = project.columnModel.columns.get(
-                		project.columnModel.getKeyColumnIndex()).getCellIndex();
+                        project.columnModel.getKeyColumnIndex()).getCellIndex();
             }
 
             @Override
             public void end(Project project) {
                 // nothing to do
             }
-            
+
             @Override
             public boolean visit(Project project, int rowIndex, Row row) {
                 Object value = row.getCellValue(cellIndex);

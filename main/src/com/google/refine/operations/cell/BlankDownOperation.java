@@ -34,57 +34,78 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.google.refine.operations.cell;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.browsing.Engine.Mode;
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.browsing.RowVisitor;
 import com.google.refine.expr.ExpressionUtils;
+import com.google.refine.model.AbstractOperation;
 import com.google.refine.model.Cell;
 import com.google.refine.model.Column;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Row;
 import com.google.refine.model.changes.CellChange;
 import com.google.refine.operations.EngineDependentMassCellOperation;
+import com.google.refine.operations.OperationDescription;
 
 public class BlankDownOperation extends EngineDependentMassCellOperation {
-    
+
     @JsonCreator
     public BlankDownOperation(
-            @JsonProperty("engineConfig")
-            EngineConfig engineConfig,
-            @JsonProperty("columnName")
-            String columnName
-        ) {
+            @JsonProperty("engineConfig") EngineConfig engineConfig,
+            @JsonProperty("columnName") String columnName) {
         super(engineConfig, columnName, true);
     }
 
     @Override
     protected String getBriefDescription(Project project) {
-        return "Blank down cells in column " + _columnName;
+        return OperationDescription.cell_blank_down_brief(_columnName);
     }
 
     @Override
     protected String createDescription(Column column,
             List<CellChange> cellChanges) {
-        
-        return "Blank down " + cellChanges.size() + 
-            " cells in column " + column.getName();
+
+        return OperationDescription.cell_blank_down_desc(cellChanges.size(), column.getName());
+    }
+
+    @Override
+    public Optional<Set<String>> getColumnDependenciesWithoutEngine() {
+        return Optional.of(Set.of(_columnName));
+    }
+
+    @Override
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.modifySingleColumn(_columnName));
+    }
+
+    @Override
+    public AbstractOperation renameColumns(Map<String, String> newColumnNames) {
+        return new BlankDownOperation(
+                getEngineConfig().renameColumnDependencies(newColumnNames),
+                newColumnNames.getOrDefault(_columnName, _columnName));
     }
 
     @Override
     protected RowVisitor createRowVisitor(Project project, List<CellChange> cellChanges, long historyEntryID) throws Exception {
         Column column = project.columnModel.getColumnByName(_columnName);
         Mode engineMode = createEngine(project).getMode();
-        
+
         return new RowVisitor() {
-            int                 cellIndex;
-            int 			    keyCellIndex;
-            List<CellChange>    cellChanges;
-            Cell                previousCell;
-            Mode                engineMode;
-            
+
+            int cellIndex;
+            int keyCellIndex;
+            List<CellChange> cellChanges;
+            Cell previousCell;
+            Mode engineMode;
+
             public RowVisitor init(int cellIndex, List<CellChange> cellChanges, Mode engineMode) {
                 this.cellIndex = cellIndex;
                 this.cellChanges = cellChanges;
@@ -94,15 +115,15 @@ public class BlankDownOperation extends EngineDependentMassCellOperation {
 
             @Override
             public void start(Project project) {
-            	keyCellIndex = project.columnModel.columns.get(
-                		project.columnModel.getKeyColumnIndex()).getCellIndex();
+                keyCellIndex = project.columnModel.columns.get(
+                        project.columnModel.getKeyColumnIndex()).getCellIndex();
             }
 
             @Override
             public void end(Project project) {
                 // nothing to do
             }
-            
+
             @Override
             public boolean visit(Project project, int rowIndex, Row row) {
                 if (engineMode.equals(Mode.RecordBased) && ExpressionUtils.isNonBlankData(row.getCellValue(keyCellIndex))) {

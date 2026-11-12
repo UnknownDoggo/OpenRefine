@@ -33,35 +33,61 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.operations.column;
 
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.commons.lang.Validate;
+
 import com.google.refine.history.Change;
 import com.google.refine.history.HistoryEntry;
 import com.google.refine.model.AbstractOperation;
 import com.google.refine.model.Column;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.changes.ColumnRemovalChange;
+import com.google.refine.operations.OperationDescription;
 
 public class ColumnRemovalOperation extends AbstractOperation {
+
     final protected String _columnName;
 
     @JsonCreator
     public ColumnRemovalOperation(
-        @JsonProperty("columnName")
-        String columnName
-    ) {
+            @JsonProperty("columnName") String columnName) {
         _columnName = columnName;
     }
-    
+
+    @Override
+    public void validate() {
+        Validate.notNull(_columnName, "Missing column name");
+    }
+
     @JsonProperty("columnName")
     public String getColumnName() {
         return _columnName;
     }
 
-
     @Override
     protected String getBriefDescription(Project project) {
-        return "Remove column " + _columnName;
+        return OperationDescription.column_removal_brief(_columnName);
+    }
+
+    @Override
+    public Optional<Set<String>> getColumnDependencies() {
+        return Optional.of(Set.of(_columnName));
+    }
+
+    @Override
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.builder().deleteColumn(_columnName).build());
+    }
+
+    @Override
+    public ColumnRemovalOperation renameColumns(Map<String, String> newColumnNames) {
+        return new ColumnRemovalOperation(newColumnNames.getOrDefault(_columnName, _columnName));
     }
 
     @Override
@@ -70,11 +96,11 @@ public class ColumnRemovalOperation extends AbstractOperation {
         if (column == null) {
             throw new Exception("No column named " + _columnName);
         }
-        
-        String description = "Remove column " + column.getName();
-        
+
+        String description = getBriefDescription(project);
+
         Change change = new ColumnRemovalChange(project.columnModel.columns.indexOf(column));
-        
+
         return new HistoryEntry(historyEntryID, project, description, ColumnRemovalOperation.this, change);
     }
 }

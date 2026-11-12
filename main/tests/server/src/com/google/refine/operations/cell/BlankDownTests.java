@@ -24,13 +24,20 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.operations.cell;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Properties;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertThrows;
 
-import org.testng.Assert;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.BeforeSuite;
@@ -38,101 +45,252 @@ import org.testng.annotations.Test;
 
 import com.google.refine.ProjectManager;
 import com.google.refine.RefineTest;
+import com.google.refine.browsing.DecoratedValue;
+import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.EngineConfig;
+import com.google.refine.browsing.facets.ListFacet;
+import com.google.refine.expr.MetaParser;
+import com.google.refine.grel.Parser;
 import com.google.refine.model.AbstractOperation;
 import com.google.refine.model.Column;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Row;
+import com.google.refine.operations.OperationDescription;
 import com.google.refine.operations.OperationRegistry;
-import com.google.refine.process.Process;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
 public class BlankDownTests extends RefineTest {
-    
+
     Project project = null;
-    
+    Project projectToBlankDown = null;
+    Project projectForRecordKey = null;
+    ListFacet.ListFacetConfig facet;
+
+    @BeforeMethod
+    public void registerGRELParser() {
+        MetaParser.registerLanguageParser("grel", "GREL", Parser.grelParser, "value");
+    }
+
+    @AfterMethod
+    public void unregisterGRELParser() {
+        MetaParser.unregisterLanguageParser("grel");
+    }
+
     @BeforeSuite
     public void registerOperation() {
         OperationRegistry.registerOperation(getCoreModule(), "blank-down", BlankDownOperation.class);
     }
-    
+
     @BeforeMethod
     public void setUp() {
-        project = createCSVProject(
-                "key,first,second\n"+
-                "a,b,c\n"+
-                ",d,c\n"+
-                "e,f,c\n"+
-                ",,c\n");
+        project = createProject(
+                new String[] { "key", "first", "second" },
+                new Serializable[][] {
+                        { "a", "b", "c" },
+                        { null, "d", "c" },
+                        { "e", "f", "c" },
+                        { null, null, "c" }
+                });
+
+        projectToBlankDown = createProject(new String[] { "foo", "bar", "hello" },
+                new Serializable[][] {
+                        { "a", "b", "c" },
+                        { "", "b", "d" },
+                        { "e", "b", "f" },
+                        { null, "g", "h" },
+                        { null, "g", "i" }
+                });
+
+        projectForRecordKey = createProject(new String[] { "foo", "bar" },
+                new Serializable[][] {
+                        { "a", "b" },
+                        { "a", "b" },
+                        { "e", "b" },
+                        { "e", "g" },
+                        { "e", "g" }
+                });
+
+        facet = new ListFacet.ListFacetConfig();
+        facet.name = "hello";
+        facet.expression = "grel:value";
+        facet.columnName = "hello";
     }
-    
+
     @AfterMethod
     public void tearDown() {
         ProjectManager.singleton.deleteProject(project.id);
+        ProjectManager.singleton.deleteProject(projectToBlankDown.id);
+        ProjectManager.singleton.deleteProject(projectForRecordKey.id);
     }
-    
+
     @Test
     public void serializeBlankDownOperation() throws Exception {
         String json = "{\"op\":\"core/blank-down\","
-                + "\"description\":\"Blank down cells in column my column\","
+                + "\"description\":" + new TextNode(OperationDescription.cell_blank_down_brief("my column")).toString() + ","
                 + "\"engineConfig\":{\"mode\":\"record-based\",\"facets\":[]},"
                 + "\"columnName\":\"my column\"}";
         AbstractOperation op = ParsingUtilities.mapper.readValue(json, BlankDownOperation.class);
         TestUtils.isSerializedTo(op, json);
     }
-    
+
     @Test
-    public void testBlankDownRecords() throws Exception {
-        AbstractOperation op = new BlankDownOperation(
-                EngineConfig.reconstruct("{\"mode\":\"record-based\",\"facets\":[]}"),
-                "second");
-        Process process = op.createProcess(project, new Properties());
-        process.performImmediate();
-        
-        Assert.assertEquals("c", project.rows.get(0).cells.get(2).value);
-        Assert.assertNull(project.rows.get(1).cells.get(2));
-        Assert.assertEquals("c", project.rows.get(2).cells.get(2).value);
-        Assert.assertNull(project.rows.get(3).cells.get(2));
+    public void testValidate() {
+        assertThrows(IllegalArgumentException.class, () -> new BlankDownOperation(invalidEngineConfig, "bar").validate());
+        assertThrows(IllegalArgumentException.class, () -> new BlankDownOperation(defaultEngineConfig, null).validate());
     }
-    
+
     @Test
-    public void testBlankDownRows() throws Exception {
-        AbstractOperation op = new BlankDownOperation(
-                EngineConfig.reconstruct("{\"mode\":\"row-based\",\"facets\":[]}"),
-                "second");
-        Process process = op.createProcess(project, new Properties());
-        process.performImmediate();
-        
-        Assert.assertEquals("c", project.rows.get(0).cells.get(2).value);
-        Assert.assertNull(project.rows.get(1).cells.get(2));
-        Assert.assertNull(project.rows.get(2).cells.get(2));
-        Assert.assertNull(project.rows.get(3).cells.get(2));
+    public void testColumnsDiff() {
+        assertEquals(new BlankDownOperation(defaultEngineConfig, "bar").getColumnsDiff().get(), ColumnsDiff.modifySingleColumn("bar"));
     }
-    
+
+    @Test
+    public void testColumnsDependencies() {
+        assertEquals(new BlankDownOperation(defaultEngineConfig, "bar").getColumnDependencies().get(), Set.of("bar"));
+        assertEquals(new BlankDownOperation(engineConfigWithColumnDeps, "bar").getColumnDependencies().get(), Set.of("bar", "facet_1"));
+    }
+
+    @Test
+    public void testRenameColumns() {
+        String renamedJson = "{\"op\":\"core/blank-down\","
+                + "\"description\":" + new TextNode(OperationDescription.cell_blank_down_brief("bar")).toString() + ","
+                + "\"engineConfig\":{\"mode\":\"row-based\",\"facets\":[]},"
+                + "\"columnName\":\"bar\"}";
+
+        var SUT = new BlankDownOperation(defaultEngineConfig, "foo");
+        AbstractOperation renamed = SUT.renameColumns(Map.of("foo", "bar"));
+        TestUtils.isSerializedTo(renamed, renamedJson);
+    }
+
+    @Test
+    public void testBlankDownRecordsNoFacets() throws Exception {
+        BlankDownOperation operation = new BlankDownOperation(EngineConfig.deserialize("{\"mode\":\"record-based\",\"facets\":[]}"), "bar");
+
+        runOperation(operation, projectToBlankDown);
+
+        Project expectedProject = createProject(new String[] { "foo", "bar", "hello" },
+                new Serializable[][] {
+                        { "a", "b", "c" },
+                        { "", null, "d" },
+                        { "e", "b", "f" },
+                        { null, "g", "h" },
+                        { null, null, "i" }
+                });
+
+        assertProjectEquals(projectToBlankDown, expectedProject);
+    }
+
+    @Test
+    public void testBlankDownRowsNoFacets() throws Exception {
+        BlankDownOperation operation = new BlankDownOperation(EngineConfig.defaultRowBased(), "bar");
+
+        runOperation(operation, projectToBlankDown);
+
+        Project expectedProject = createProject(new String[] { "foo", "bar", "hello" },
+                new Serializable[][] {
+                        { "a", "b", "c" },
+                        { "", null, "d" },
+                        { "e", null, "f" },
+                        { null, "g", "h" },
+                        { null, null, "i" }
+                });
+
+        assertProjectEquals(projectToBlankDown, expectedProject);
+    }
+
     @Test
     public void testKeyColumnIndex() throws Exception {
-    	// Shift all column indices
-    	for(Row r : project.rows) {
-    		r.cells.add(0, null);
-    	}
-    	List<Column> newColumns = new ArrayList<>();
-    	for(Column c : project.columnModel.columns) {
-    		newColumns.add(new Column(c.getCellIndex()+1, c.getName()));
-    	}
-    	project.columnModel.columns.clear();
-    	project.columnModel.columns.addAll(newColumns);
-    	project.columnModel.update();
-    	
-    	AbstractOperation op = new BlankDownOperation(
-                EngineConfig.reconstruct("{\"mode\":\"record-based\",\"facets\":[]}"),
+        // Shift all column indices
+        for (Row r : project.rows) {
+            r.cells.add(0, null);
+        }
+        List<Column> newColumns = new ArrayList<>();
+        for (Column c : project.columnModel.columns) {
+            newColumns.add(new Column(c.getCellIndex() + 1, c.getName()));
+        }
+        project.columnModel.columns.clear();
+        project.columnModel.columns.addAll(newColumns);
+        project.columnModel.update();
+
+        AbstractOperation op = new BlankDownOperation(
+                EngineConfig.deserialize("{\"mode\":\"record-based\",\"facets\":[]}"),
                 "second");
-        Process process = op.createProcess(project, new Properties());
-        process.performImmediate();
-        
-        Assert.assertEquals("c", project.rows.get(0).cells.get(3).value);
-        Assert.assertNull(project.rows.get(1).cells.get(3));
-        Assert.assertEquals("c", project.rows.get(2).cells.get(3).value);
-        Assert.assertNull(project.rows.get(3).cells.get(3));
+
+        runOperation(op, project);
+
+        Project expectedProject = createProject(
+                new String[] { "key", "first", "second" },
+                new Serializable[][] {
+                        { "a", "b", "c" },
+                        { null, "d", null },
+                        { "e", "f", "c" },
+                        { null, null, null },
+                });
+        assertProjectEquals(project, expectedProject);
     }
+
+    @Test
+    public void testBlankDownRowsFacets() throws Exception {
+        facet.selection = Arrays.asList(
+                new DecoratedValue("c", "c"),
+                new DecoratedValue("f", "f"),
+                new DecoratedValue("i", "i"));
+        EngineConfig engineConfig = new EngineConfig(Arrays.asList(facet), Engine.Mode.RowBased);
+        BlankDownOperation operation = new BlankDownOperation(engineConfig, "bar");
+
+        runOperation(operation, projectToBlankDown);
+
+        Project expected = createProject(new String[] { "foo", "bar", "hello" },
+                new Serializable[][] {
+                        { "a", "b", "c" },
+                        { "", "b", "d" },
+                        { "e", null, "f" },
+                        { null, "g", "h" },
+                        { null, "g", "i" }
+                });
+
+        assertProjectEquals(projectToBlankDown, expected);
+    }
+
+    @Test
+    public void testBlankDownRecordsFacets() throws Exception {
+        facet.selection = Arrays.asList(
+                new DecoratedValue("c", "c"));
+        EngineConfig engineConfig = new EngineConfig(Arrays.asList(facet), Engine.Mode.RecordBased);
+        BlankDownOperation operation = new BlankDownOperation(engineConfig, "bar");
+
+        runOperation(operation, projectToBlankDown);
+
+        Project expected = createProject(new String[] { "foo", "bar", "hello" },
+                new Serializable[][] {
+                        { "a", "b", "c" },
+                        { "", null, "d" },
+                        { "e", "b", "f" },
+                        { null, "g", "h" },
+                        { null, "g", "i" }
+                });
+
+        assertProjectEquals(projectToBlankDown, expected);
+    }
+
+    @Test
+    public void testBlankDownRecordKey() throws Exception {
+        BlankDownOperation operation = new BlankDownOperation(EngineConfig.deserialize("{\"mode\":\"row-based\",\"facets\":[]}"), "foo");
+
+        runOperation(operation, projectForRecordKey);
+
+        Project expected = createProject(new String[] { "foo", "bar" },
+                new Serializable[][] {
+                        { "a", "b" },
+                        { null, "b" },
+                        { "e", "b" },
+                        { null, "g" },
+                        { null, "g" }
+                });
+
+        assertProjectEquals(projectForRecordKey, expected);
+    }
+
 }

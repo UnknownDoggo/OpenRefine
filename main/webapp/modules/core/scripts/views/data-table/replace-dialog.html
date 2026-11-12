@@ -3,17 +3,17 @@
     <div class="dialog-header" bind="dialogHeader"></div>
     <div class="dialog-body" bind="dialogBody">
       <div class="grid-layout layout-looser layout-full">
-        <table>
+        <table role="presentation">
           <tr>
             <td>
               <div class="grid-layout layout-tighter">
-                <table>
+                <table role="presentation">
                   <tr>
                     <td width="20%">
                       <label for="$text-to-find"><h3 bind="or_views_text_to_find"></h3></label>
                     </td>
                     <td>
-                      <input type="text" size="40" bind="text_to_findInput" id="$text-to-find"></input>
+                      <input spellcheck="false" type="text" size="40" bind="text_to_findInput" id="$text-to-find"></input>
                     </td>
                   </tr>
                   <tr>
@@ -53,7 +53,7 @@
       </div>
     </div>
     <div class="dialog-footer" bind="dialogFooter">
-      <button class="button" bind="okButton"></button>
+      <button class="button button-primary" bind="okButton"></button>
       <button class="button" bind="cancelButton"></button>
     </div>
   </div>

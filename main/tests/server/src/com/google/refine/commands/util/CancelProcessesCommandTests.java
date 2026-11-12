@@ -38,17 +38,17 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertThrows;
 
-import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 
-import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.slf4j.LoggerFactory;
-import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.BeforeTest;
@@ -60,6 +60,7 @@ import com.google.refine.commands.Command;
 import com.google.refine.commands.history.CancelProcessesCommand;
 import com.google.refine.model.Project;
 import com.google.refine.process.ProcessManager;
+import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
 public class CancelProcessesCommandTests extends RefineTest {
@@ -69,7 +70,7 @@ public class CancelProcessesCommandTests extends RefineTest {
     public void init() {
         logger = LoggerFactory.getLogger(this.getClass());
     }
-    
+
     // System Under Test
     CancelProcessesCommand SUT = null;
 
@@ -114,69 +115,29 @@ public class CancelProcessesCommandTests extends RefineTest {
 
     @Test
     public void doPostFailsThrowsWithNullParameters() {
-
         // both parameters null
-        try {
-            SUT.doPost(null, null);
-            Assert.fail(); // should have thrown exception by this point
-        } catch (IllegalArgumentException e){
-            //expected
-        } catch (ServletException e) {
-            Assert.fail();
-        } catch (Exception e) {
-            Assert.fail();
-        }
-
+        assertThrows(IllegalArgumentException.class, () -> SUT.doPost(null, null));
         // request is null
-        try {
-            SUT.doPost(null, response);
-            Assert.fail(); // should have thrown exception by this point
-        } catch (IllegalArgumentException e){
-            //expected
-        } catch (ServletException e) {
-            Assert.fail();
-        } catch (Exception e) {
-            Assert.fail();
-        }
-
+        assertThrows(IllegalArgumentException.class, () -> SUT.doPost(null, response));
         // response parameter null
-        try {
-            SUT.doPost(request, null);
-            Assert.fail(); // should have thrown exception by this point
-        } catch (IllegalArgumentException e){
-            // expected
-        } catch (ServletException e) {
-            Assert.fail();
-        } catch (Exception e) {
-            Assert.fail();
-        }
+        assertThrows(IllegalArgumentException.class, () -> SUT.doPost(request, null));
     }
 
     /**
-     *  Contract for a complete working post
+     * Contract for a complete working post
      */
     @Test
-    public void doPostRegressionTest() {
+    public void doPostRegressionTest() throws Exception {
 
         // mock dependencies
         when(request.getParameter("project")).thenReturn(PROJECT_ID);
         when(request.getParameter("csrf_token")).thenReturn(Command.csrfFactory.getFreshToken());
         when(projMan.getProject(anyLong())).thenReturn(proj);
         when(proj.getProcessManager()).thenReturn(processMan);
-        try {
-            when(response.getWriter()).thenReturn(pw);
-        } catch (IOException e1) {
-            Assert.fail();
-        }
+        when(response.getWriter()).thenReturn(pw);
 
         // run
-        try {
-            SUT.doPost(request, response);
-        } catch (ServletException e) {
-            Assert.fail();
-        } catch (IOException e) {
-            Assert.fail();
-        }
+        SUT.doPost(request, response);
 
         // verify
         verify(request, times(1)).getParameter("project");
@@ -187,73 +148,51 @@ public class CancelProcessesCommandTests extends RefineTest {
         verify(response, times(1))
                 .setHeader("Content-Type", "application/json");
         verify(proj, times(1)).getProcessManager();
-        try {
-            verify(response, times(1)).getWriter();
-        } catch (IOException e) {
-            Assert.fail();
-        }
+        verify(response, times(1)).getWriter();
         TestUtils.assertEqualsAsJson(sw.toString(), "{ \"code\" : \"ok\" }");
     }
 
-     @Test
-     public void doPostThrowsIfCommand_getProjectReturnsNull(){
+    @Test
+    public void doPostThrowsIfCommand_getProjectReturnsNull() throws Exception {
         // mock dependencies
         when(request.getParameter("project")).thenReturn(PROJECT_ID);
         when(request.getParameter("csrf_token")).thenReturn(Command.csrfFactory.getFreshToken());
         when(projMan.getProject(anyLong()))
-            .thenReturn(null);
-        try {
-            when(response.getWriter()).thenReturn(pw);
-        } catch (IOException e1) {
-            Assert.fail();
-        }
+                .thenReturn(null);
+        when(response.getWriter()).thenReturn(pw);
 
         // run
-        try {
-            SUT.doPost(request, response);
-        } catch (ServletException e) {
-            //expected
-        } catch (IOException e) {
-            Assert.fail();
-        }
+        SUT.doPost(request, response);
 
         // verify
         verify(request, times(1)).getParameter("project");
         verify(projMan, times(1)).getProject(PROJECT_ID_LONG);
-     }
+        ObjectNode jsonResponse = (ObjectNode) ParsingUtilities.mapper.readTree(sw.toString());
+        assertEquals(jsonResponse.get("code").asText(), "error");
+    }
 
-     @Test
-     public void doPostCatchesExceptionFromWriter(){
-         String ERROR_MESSAGE = "hello world";
+    @Test
+    public void doPostCatchesExceptionFromWriter() throws Exception {
+        String ERROR_MESSAGE = "hello world";
 
         // mock dependencies
-            when(request.getParameter("project")).thenReturn(PROJECT_ID);
-            when(request.getParameter("csrf_token")).thenReturn(Command.csrfFactory.getFreshToken());
-            when(projMan.getProject(anyLong())).thenReturn(proj);
-            when(proj.getProcessManager()).thenReturn(processMan);
-            try {
-                when(response.getWriter()).thenThrow(new IllegalStateException(ERROR_MESSAGE))
+        when(request.getParameter("project")).thenReturn(PROJECT_ID);
+        when(request.getParameter("csrf_token")).thenReturn(Command.csrfFactory.getFreshToken());
+        when(projMan.getProject(anyLong())).thenReturn(proj);
+        when(proj.getProcessManager()).thenReturn(processMan);
+        when(response.getWriter()).thenThrow(new IllegalStateException(ERROR_MESSAGE))
                 .thenReturn(pw);
-            } catch (IOException e) {
-                Assert.fail();
-            }
 
-            // run
-            try {
-                SUT.doPost(request, response);
-            } catch (ServletException e) {
-                Assert.fail();
-            } catch (IOException e) {
-                Assert.fail();
-            }
+        // run
+        SUT.doPost(request, response);
 
-            verify(request, times(1)).getParameter("project");
-            verify(projMan, times(1)).getProject(PROJECT_ID_LONG);
+        verify(request, times(1)).getParameter("project");
+        verify(projMan, times(1)).getProject(PROJECT_ID_LONG);
 
-            verify(processMan, times(1)).cancelAll();
-            verify(response, times(2)).setCharacterEncoding("UTF-8");
-            //omitted other verifications for brevity.
-            //assumption is that expecting response.setCharacterEncoding times(3)
-            //implies it has Command.respondException has been called as expected
-     }
+        verify(processMan, times(1)).cancelAll();
+        verify(response, times(2)).setCharacterEncoding("UTF-8");
+        // omitted other verifications for brevity.
+        // assumption is that expecting response.setCharacterEncoding times(3)
+        // implies it has Command.respondException has been called as expected
+    }
 }

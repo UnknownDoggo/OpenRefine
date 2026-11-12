@@ -39,12 +39,17 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.google.refine.browsing.Engine;
 import com.google.refine.clustering.Clusterer;
 import com.google.refine.clustering.ClustererConfig;
+import com.google.refine.clustering.binning.KeyerFactory;
+import com.google.refine.clustering.binning.UserDefinedKeyer;
+import com.google.refine.clustering.knn.DistanceFactory;
+import com.google.refine.clustering.knn.UserDefinedDistance;
 import com.google.refine.commands.Command;
 import com.google.refine.model.Project;
 import com.google.refine.util.ParsingUtilities;
@@ -52,28 +57,46 @@ import com.google.refine.util.ParsingUtilities;
 public class ComputeClustersCommand extends Command {
 
     final static Logger logger = LoggerFactory.getLogger("compute-clusters_command");
-    
-    /**
-     * This command uses POST (probably to allow for larger parameters) but does not actually modify any state
-     * so we do not add CSRF protection to it.
-     */
+
     @Override
     public void doPost(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        
+        // This command triggers evaluation expression and therefore requires CSRF-protection
+        if (!hasValidCSRFToken(request)) {
+            respondCSRFError(response);
+            return;
+        }
+
         try {
             long start = System.currentTimeMillis();
             Project project = getProject(request);
             Engine engine = getEngine(request, project);
             String clusterer_conf = request.getParameter("clusterer");
+
+            JsonNode jsonObject = ParsingUtilities.mapper.readTree(clusterer_conf);
+            JsonNode params = jsonObject.get("params");
+
+            if (params != null && params.has("expression")) {
+                String expression = params.get("expression").asText();
+                if (jsonObject.has("function") && "UserDefinedKeyer".equals(jsonObject.get("function").asText())) {
+                    KeyerFactory.put("userdefinedkeyer", new UserDefinedKeyer(expression));
+                } else {
+                    DistanceFactory.put("userdefineddistance", new UserDefinedDistance(expression));
+                }
+            }
+
             ClustererConfig clustererConfig = ParsingUtilities.mapper.readValue(clusterer_conf, ClustererConfig.class);
 
             Clusterer clusterer = clustererConfig.apply(project);
-            
+
             clusterer.computeClusters(engine);
-            
+
+            KeyerFactory.remove("userdefinedkeyer");
+            DistanceFactory.remove("userdefineddistance");
+
             respondJSON(response, clusterer);
-            logger.info("computed clusters [{}] in {}ms", new Object[] { clustererConfig.getType(), Long.toString(System.currentTimeMillis() - start) });
+            logger.info("computed clusters [{}] in {}ms",
+                    new Object[] { clustererConfig.getType(), Long.toString(System.currentTimeMillis() - start) });
         } catch (Exception e) {
             respondException(response, e);
         }

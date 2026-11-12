@@ -36,14 +36,18 @@ package com.google.refine.operations.recon;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.browsing.RowVisitor;
 import com.google.refine.history.Change;
 import com.google.refine.model.Cell;
 import com.google.refine.model.Column;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Recon;
 import com.google.refine.model.Recon.Judgment;
@@ -51,27 +55,26 @@ import com.google.refine.model.Row;
 import com.google.refine.model.changes.CellChange;
 import com.google.refine.model.changes.ReconChange;
 import com.google.refine.operations.EngineDependentMassCellOperation;
+import com.google.refine.operations.OperationDescription;
 
 public class ReconDiscardJudgmentsOperation extends EngineDependentMassCellOperation {
+
     final protected boolean _clearData;
-    
+
     @JsonCreator
     public ReconDiscardJudgmentsOperation(
-            @JsonProperty("engineConfig")
-            EngineConfig engineConfig,
-            @JsonProperty("columnName")
-            String columnName, 
-            @JsonProperty("clearData")
-            boolean clearData) {
+            @JsonProperty("engineConfig") EngineConfig engineConfig,
+            @JsonProperty("columnName") String columnName,
+            @JsonProperty("clearData") boolean clearData) {
         super(engineConfig, columnName, false);
         _clearData = clearData;
     }
-    
+
     @JsonProperty("columnName")
     public String getColumnName() {
         return _columnName;
     }
-    
+
     @JsonProperty("clearData")
     public boolean getClearData() {
         return _clearData;
@@ -80,37 +83,55 @@ public class ReconDiscardJudgmentsOperation extends EngineDependentMassCellOpera
     @Override
     protected String getBriefDescription(Project project) {
         return _clearData ?
-            "Discard recon judgments and clear recon data for cells in column " + _columnName :
-            "Discard recon judgments for cells in column " + _columnName;
+        // "Discard recon judgments and clear recon data for cells in column " + _columnName :
+                OperationDescription.recon_discard_judgments_clear_data_brief(_columnName) :
+                // "Discard recon judgments for cells in column " + _columnName
+                OperationDescription.recon_discard_judgments_brief(_columnName);
     }
 
     @Override
     protected String createDescription(Column column,
             List<CellChange> cellChanges) {
-        
-        return (_clearData ?
-            "Discard recon judgments and clear recon data" :
-            "Discard recon judgments") +
-            " for " + cellChanges.size() + " cells in column " + column.getName();
+        return _clearData ? OperationDescription.recon_discard_judgments_clear_data_desc(cellChanges.size(), column.getName())
+                : OperationDescription.recon_discard_judgments_desc(cellChanges.size(), column.getName());
+    }
+
+    @Override
+    public Optional<Set<String>> getColumnDependenciesWithoutEngine() {
+        return Optional.of(Set.of(_columnName));
+    }
+
+    @Override
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.modifySingleColumn(_columnName));
+    }
+
+    @Override
+    public ReconDiscardJudgmentsOperation renameColumns(Map<String, String> newColumnNames) {
+        return new ReconDiscardJudgmentsOperation(
+                _engineConfig.renameColumnDependencies(newColumnNames),
+                newColumnNames.getOrDefault(_columnName, _columnName),
+                _clearData);
     }
 
     @Override
     protected RowVisitor createRowVisitor(Project project, List<CellChange> cellChanges, long historyEntryID) throws Exception {
         Column column = project.columnModel.getColumnByName(_columnName);
-        
+
         return new RowVisitor() {
+
             int cellIndex;
             List<CellChange> cellChanges;
             Map<Long, Recon> dupReconMap = new HashMap<Long, Recon>();
             long historyEntryID;
-            
+
             public RowVisitor init(int cellIndex, List<CellChange> cellChanges, long historyEntryID) {
                 this.cellIndex = cellIndex;
                 this.cellChanges = cellChanges;
                 this.historyEntryID = historyEntryID;
                 return this;
             }
-            
+
             @Override
             public void start(Project project) {
                 // nothing to do
@@ -120,7 +141,7 @@ public class ReconDiscardJudgmentsOperation extends EngineDependentMassCellOpera
             public void end(Project project) {
                 // nothing to do
             }
-            
+
             @Override
             public boolean visit(Project project, int rowIndex, Row row) {
                 Cell cell = row.getCell(cellIndex);
@@ -137,13 +158,13 @@ public class ReconDiscardJudgmentsOperation extends EngineDependentMassCellOpera
                             newRecon.judgment = Judgment.None;
                             newRecon.judgmentAction = "mass";
                             newRecon.judgmentBatchSize = 1;
-                            
+
                             dupReconMap.put(cell.recon.id, newRecon);
                         }
                     }
-                    
+
                     Cell newCell = new Cell(cell.value, newRecon);
-                    
+
                     CellChange cellChange = new CellChange(rowIndex, cellIndex, cell, newCell);
                     cellChanges.add(cellChange);
                 }
@@ -151,14 +172,13 @@ public class ReconDiscardJudgmentsOperation extends EngineDependentMassCellOpera
             }
         }.init(column.getCellIndex(), cellChanges, historyEntryID);
     }
-    
+
     @Override
     protected Change createChange(Project project, Column column, List<CellChange> cellChanges) {
         return new ReconChange(
-            cellChanges, 
-            _columnName, 
-            column.getReconConfig(),
-            null
-        );
+                cellChanges,
+                _columnName,
+                column.getReconConfig(),
+                null);
     }
 }

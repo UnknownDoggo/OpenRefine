@@ -29,17 +29,17 @@
 
 package com.google.refine.extension.database.sqlite;
 
+import java.sql.Connection;
+import java.sql.SQLException;
+
+import org.testng.Assert;
+import org.testng.annotations.BeforeTest;
+import org.testng.annotations.Test;
+
 import com.google.refine.extension.database.DBExtensionTests;
 import com.google.refine.extension.database.DatabaseConfiguration;
 import com.google.refine.extension.database.DatabaseService;
 import com.google.refine.extension.database.DatabaseServiceException;
-import org.mockito.MockitoAnnotations;
-import org.testng.Assert;
-import org.testng.annotations.*;
-
-import java.io.File;
-import java.sql.Connection;
-import java.sql.SQLException;
 
 @Test(groups = { "requiresSQLite" })
 public class SQLiteConnectionManagerTest extends DBExtensionTests {
@@ -47,27 +47,10 @@ public class SQLiteConnectionManagerTest extends DBExtensionTests {
     private DatabaseConfiguration testDbConfig;
 
     @BeforeTest
-    @Parameters({ "sqliteDbName", "sqliteTestTable" })
-    public void beforeTest(@Optional(DEFAULT_SQLITE_DB_NAME) String sqliteDbName,
-                    @Optional(DEFAULT_TEST_TABLE) String sqliteTestTable)
-                    throws DatabaseServiceException, SQLException {
-
-        MockitoAnnotations.initMocks(this);
-
-        testDbConfig = new DatabaseConfiguration();
-        testDbConfig.setDatabaseName(sqliteDbName);
-        testDbConfig.setDatabaseType(SQLiteDatabaseService.DB_NAME);
+    public void beforeTest() throws DatabaseServiceException, SQLException {
+        testDbConfig = getSQLiteDatabaseConfiguration();
 
         DatabaseService.DBType.registerDatabase(SQLiteDatabaseService.DB_NAME, SQLiteDatabaseService.getInstance());
-    }
-
-    @AfterTest
-    @Parameters({ "sqliteDbName" })
-    public void afterTest(@Optional(DEFAULT_SQLITE_DB_NAME) String sqliteDbName) {
-        File f = new File(sqliteDbName);
-        if (f.exists()) {
-            f.delete();
-        }
     }
 
     @Test
@@ -89,11 +72,7 @@ public class SQLiteConnectionManagerTest extends DBExtensionTests {
         Connection conn = SQLiteConnectionManager.getInstance().getConnection(testDbConfig);
         Assert.assertNotNull(conn);
 
-        SQLiteConnectionManager.getInstance().shutdown();
-
-        if (conn != null) {
-            Assert.assertTrue(conn.isClosed());
-        }
-
+        conn.close();
+        Assert.assertTrue(conn.isClosed());
     }
 }

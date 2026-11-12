@@ -106,9 +106,13 @@ Refine.ExcelParserUI.prototype.getOptions = function() {
     options.limit = -1;
   }
   options.storeBlankRows = this._optionContainerElmts.storeBlankRowsCheckbox[0].checked;
+  options.storeBlankColumns = this._optionContainerElmts.storeBlankColumnsCheckbox[0].checked;
   options.storeBlankCellsAsNulls = this._optionContainerElmts.storeBlankCellsAsNullsCheckbox[0].checked;
   options.includeFileSources = this._optionContainerElmts.includeFileSourcesCheckbox[0].checked;
   options.includeArchiveFileName = this._optionContainerElmts.includeArchiveFileCheckbox[0].checked;
+  options.forceText = this._optionContainerElmts.forceTextCheckbox[0].checked;
+
+  options.disableAutoPreview = this._optionContainerElmts.disableAutoPreviewCheckbox[0].checked;
 
   return options;
 };
@@ -116,15 +120,16 @@ Refine.ExcelParserUI.prototype.getOptions = function() {
 Refine.ExcelParserUI.prototype._initialize = function() {
   var self = this;
 
-  this._optionContainer.unbind().empty().html(
+  this._optionContainer.off().empty().html(
       DOM.loadHTML("core", "scripts/index/parser-interfaces/excel-parser-ui.html"));
   this._optionContainerElmts = DOM.bind(this._optionContainer);
-  this._optionContainerElmts.previewButton.click(function() { self._updatePreview(); });  
+  this._optionContainerElmts.previewButton.on('click',function() { self._updatePreview(); });  
   this._optionContainerElmts.previewButton.html($.i18n('core-buttons/update-preview'));
-  this._optionContainerElmts.selectAllButton.click(function() { self._selectAll(); }); 
+  this._optionContainerElmts.selectAllButton.on('click',function() { self._selectAll(); }); 
   this._optionContainerElmts.selectAllButton.html($.i18n('core-buttons/select-all'));
-  this._optionContainerElmts.unselectAllButton.click(function() { self._unselectAll(); }); 
-  this._optionContainerElmts.unselectAllButton.html($.i18n('core-buttons/unselect-all'));
+  this._optionContainerElmts.deselectAllButton.on('click',function() { self._deselectAll(); }); 
+  this._optionContainerElmts.deselectAllButton.html($.i18n('core-buttons/deselect-all'));
+  $('#or-disable-auto-preview').text($.i18n('core-index-parser/disable-auto-preview'));
   $('#or-import-worksheet').text($.i18n('core-index-import/import-worksheet'));
   $('#or-import-ignore').text($.i18n('core-index-parser/ignore-first'));
   $('#or-import-lines').text($.i18n('core-index-parser/lines-beg'));
@@ -135,9 +140,11 @@ Refine.ExcelParserUI.prototype._initialize = function() {
   $('#or-import-load').text($.i18n('core-index-parser/load-at-most'));
   $('#or-import-rows2').text($.i18n('core-index-parser/rows-data'));
   $('#or-import-blank').text($.i18n('core-index-parser/store-blank'));
+  $('#or-import-blank-columns').text($.i18n('core-index-parser/store-blank-columns'));
   $('#or-import-null').text($.i18n('core-index-parser/store-nulls'));
   $('#or-import-source').html($.i18n('core-index-parser/store-source'));
   $('#or-import-archive').html($.i18n('core-index-parser/store-archive'));
+  $('#or-force-text').html($.i18n('core-index-parser/force-text'));
 
   var sheetTable = this._optionContainerElmts.sheetRecordContainer[0];
   $.each(this._config.sheetRecords, function(i, v) {
@@ -182,6 +189,9 @@ Refine.ExcelParserUI.prototype._initialize = function() {
   if (this._config.storeBlankRows) {
     this._optionContainerElmts.storeBlankRowsCheckbox.prop("checked", true);
   }
+  if (this._config.storeBlankColumns) {
+    this._optionContainerElmts.storeBlankColumnsCheckbox.prop("checked", true);
+  }
   if (this._config.storeBlankCellsAsNulls) {
     this._optionContainerElmts.storeBlankCellsAsNullsCheckbox.prop("checked", true);
   }
@@ -191,12 +201,23 @@ Refine.ExcelParserUI.prototype._initialize = function() {
   if (this._config.includeArchiveFileName) {
     this._optionContainerElmts.includeArchiveFileCheckbox.prop("checked", true);
   }
+  if (this._config.forceText) {
+    this._optionContainerElmts.forceTextCheckbox.prop("checked", true);
+  }
 
+  if (this._config.disableAutoPreview) {
+    this._optionContainerElmts.disableAutoPreviewCheckbox.prop('checked', true);
+  }
+
+  // If disableAutoPreviewCheckbox is not checked, we will schedule an automatic update
   var onChange = function() {
-    self._scheduleUpdatePreview();
+    if (!self._optionContainerElmts.disableAutoPreviewCheckbox[0].checked)
+    {
+        self._scheduleUpdatePreview();
+    }
   };
-  this._optionContainer.find("input").bind("change", onChange);
-  this._optionContainer.find("select").bind("change", onChange);
+  this._optionContainer.find("input").on("change", onChange);
+  this._optionContainer.find("select").on("change", onChange);
 };
 
 Refine.ExcelParserUI.prototype._scheduleUpdatePreview = function() {
@@ -222,7 +243,7 @@ Refine.ExcelParserUI.prototype._updatePreview = function() {
       self._controller.getPreviewData(function(projectData) {
         self._progressContainer.hide();
 
-        new Refine.PreviewTable(projectData, self._dataContainer.unbind().empty());
+        new Refine.PreviewTable(projectData, self._dataContainer.off().empty());
       });
     }
   }, function() {
@@ -240,7 +261,7 @@ Refine.ExcelParserUI.prototype._selectAll = function() {
   self._scheduleUpdatePreview();
 }
 
-Refine.ExcelParserUI.prototype._unselectAll = function() {
+Refine.ExcelParserUI.prototype._deselectAll = function() {
   var self = this;
 
   $(".core-excel-worksheet").each(function(index, value){

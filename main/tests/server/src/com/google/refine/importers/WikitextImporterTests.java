@@ -33,18 +33,13 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.importers;
 
-
+import java.io.Serializable;
 import java.io.StringReader;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-import org.mockito.Mockito;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
 import org.slf4j.LoggerFactory;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
@@ -52,17 +47,14 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Test;
 
+import com.google.refine.model.Project;
 import com.google.refine.model.Recon;
-import com.google.refine.model.ReconCandidate;
-import com.google.refine.model.recon.ReconJob;
-import com.google.refine.model.recon.StandardReconConfig;
-
 
 public class WikitextImporterTests extends ImporterTest {
 
     private WikitextImporter importer = null;
     private Map<String, Recon> mockedRecons = null;
-    
+
     @Override
     @BeforeTest
     public void init() {
@@ -79,38 +71,36 @@ public class WikitextImporterTests extends ImporterTest {
 
     @Override
     @AfterMethod
-    public void tearDown(){
+    public void tearDown() {
         importer = null;
         super.tearDown();
     }
-    
+
     @Test
     public void readSimpleData() {
-    	String input = "\n"
-		+ "{|\n"
-		+ "|-\n"
-		+ "| a || b<br/>2 || c \n"
-		+ "|-\n"
-		+ "| d || e || f<br>\n"
-		+ "|-\n"
-		+ "|}\n";
-    	try {
-    	   prepareOptions(0, 0, true, true, null);
-    	   parse(input);
-    	} catch (Exception e) {
-    	   Assert.fail("Parsing failed", e);
-    	}
-    	Assert.assertEquals(project.columnModel.columns.size(), 3);
-    	Assert.assertEquals(project.rows.size(), 2);
-        Assert.assertEquals(project.rows.get(0).cells.size(), 3);
-        Assert.assertEquals(project.rows.get(0).cells.get(0).value, "a");
-        Assert.assertEquals(project.rows.get(0).cells.get(1).value, "b\n2");
-        Assert.assertEquals(project.rows.get(1).cells.get(2).value, "f");
+        String input = "\n"
+                + "{|\n"
+                + "|-\n"
+                + "| a || b<br/>2 || c \n"
+                + "|-\n"
+                + "| d || e || f<br>\n"
+                + "|-\n"
+                + "|}\n";
+
+        prepareOptions(0, 0, true, true, null, null);
+        parse(input);
+
+        Project expectedProject = createProject(
+                new String[] { numberedColumn(1), numberedColumn(2), numberedColumn(3) },
+                new Serializable[][] {
+                        { "a", "b\n2", "c" },
+                        { "d", "e", "f" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
-    
+
     /**
-     * Issue #1448
-     * https://github.com/OpenRefine/OpenRefine/issues/1448
+     * Issue #1448 https://github.com/OpenRefine/OpenRefine/issues/1448
      */
     @Test
     public void readTableWithMisplacedHeaders() {
@@ -124,215 +114,183 @@ public class WikitextImporterTests extends ImporterTest {
                 + "| f<br>\n"
                 + "|-\n"
                 + "|}\n";
-        try {
-           prepareOptions(0, 0, true, true, null);
-           parse(input);
-        } catch (Exception e) {
-           Assert.fail("Parsing failed", e);
-        }
-        Assert.assertEquals(project.columnModel.columns.size(), 3);
-        Assert.assertEquals(project.rows.size(), 2);
-        Assert.assertEquals(project.rows.get(0).cells.size(), 3);
-        Assert.assertEquals(project.rows.get(1).cells.get(1).value, "e");
-        Assert.assertEquals(project.rows.get(1).cells.get(2).value, "f");
+
+        prepareOptions(0, 0, true, true, null, null);
+        parse(input);
+
+        Project expectedProject = createProject(
+                new String[] { numberedColumn(1), numberedColumn(2), numberedColumn(3) },
+                new Serializable[][] {
+                        { "a", "b\n2", "c" },
+                        { "d", "e", "f" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
-    
-    @BeforeMethod
-    public void mockReconCalls() throws Exception {
-        StandardReconConfig cfg = Mockito.spy(new StandardReconConfig(
-                "http://endpoint.com", "http://schemaspace", "http://schemaspace.com", null, true, Collections.emptyList(), 0));
-        PowerMockito.whenNew(StandardReconConfig.class).withAnyArguments().thenReturn(cfg);
-        Answer<List<Recon>> mockedResponse = new Answer<List<Recon>>() {
-            @Override
-            public List<Recon> answer(InvocationOnMock invocation) throws Throwable {
-                return fakeReconCall(invocation.getArgument(0));
-            }
-        };
-        PowerMockito.doAnswer(mockedResponse).when(cfg, "batchRecon", Mockito.any(), Mockito.anyLong());
-    }
-    
-    private List<Recon> fakeReconCall(List<ReconJob> jobs) {
-        List<Recon> result = new ArrayList<>();
-        for(ReconJob job : jobs) {
-            result.add(mockedRecons.get(job.toString()));
-        }
-        return result;
-    }
-    
-    @Test(enabled = false) // disabled due to flakiness on CI
+
     public void readTableWithLinks() throws Exception {
-        // This mock is used to avoid real network connection during test
-        Recon ecdvt = Mockito.mock(Recon.class);
-        Mockito.when(ecdvt.getBestCandidate()).thenReturn(
-                new ReconCandidate("Q116214", "European Centre for the Development of Vocational Training", new String[] {"Q392918"}, 100));
-        mockedRecons.put("{\"query\":\"https://de.wikipedia.org/wiki/Europäisches Zentrum für die Förderung der Berufsbildung\"}", ecdvt);
-        Recon efilwc = Mockito.mock(Recon.class);
-        Mockito.when(efilwc.getBestCandidate()).thenReturn(
-                new ReconCandidate("Q1377549", "European Foundation for the Improvement of Living and Working Conditions", new String[] {"Q392918"}, 100));
-        mockedRecons.put("{\"query\":\"https://de.wikipedia.org/wiki/Europäische Stiftung zur Verbesserung der Lebens- und Arbeitsbedingungen\"}", efilwc);
-        Recon emcdda = Mockito.mock(Recon.class);
-        Mockito.when(emcdda.getBestCandidate()).thenReturn(
-                new ReconCandidate("Q1377256", "European Monitoring Centre for Drugs and Drug Addiction", new String[] {"Q392918"}, 100));
-        mockedRecons.put("{\"query\":\"https://de.wikipedia.org/wiki/Europäische Beobachtungsstelle für Drogen und Drogensucht\"}", emcdda);
 
-        // Data credits: Wikipedia contributors, https://de.wikipedia.org/w/index.php?title=Agenturen_der_Europäischen_Union&action=edit
+        // Data credits: Wikipedia contributors,
+        // https://de.wikipedia.org/w/index.php?title=Agenturen_der_Europäischen_Union&action=edit
         String input = "\n"
-            +"{|\n"
-            +"|-\n"
-            +"| [[Europäisches Zentrum für die Förderung der Berufsbildung|Cedefop]] || Cedefop || http://www.cedefop.europa.eu/\n"
-            +"|-\n"
-            +"| [[Europäische Stiftung zur Verbesserung der Lebens- und Arbeitsbedingungen]] || EUROFOUND || [http://www.eurofound.europa.eu/]\n"
-            +"|-\n"
-            +"| [[Europäische Beobachtungsstelle für Drogen und Drogensucht]] || EMCDDA || [http://www.emcdda.europa.eu/ europa.eu]\n"
-            +"|-\n"
-            +"|}\n";
+                + "{|\n"
+                + "|-\n"
+                + "| [[Europäisches Zentrum für die Förderung der Berufsbildung|Cedefop]] || Cedefop || http://www.cedefop.europa.eu/\n"
+                + "|-\n"
+                + "| [[Europäische Stiftung zur Verbesserung der Lebens- und Arbeitsbedingungen]] || EUROFOUND || [http://www.eurofound.europa.eu/]\n"
+                + "|-\n"
+                + "| [[Europäische Beobachtungsstelle für Drogen und Drogensucht]] || EMCDDA || [http://www.emcdda.europa.eu/ europa.eu]\n"
+                + "|-\n"
+                + "|}\n";
 
-        try {
-           prepareOptions(0, 0, true, true, "https://de.wikipedia.org/wiki/");
-           parse(input);
-        } catch (Exception e) {
-           Assert.fail("Parsing failed", e);
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            String jsonResponse = "{\"q0\":[{\"id\":\"Q1377256\",\"name\":\"Europäische Beobachtungsstelle für Drogen und Drogensucht\"}],"
+                    + "\"q1\":[{\"id\":\"Q1377549\",\"name\":\"European Foundation for the Improvement of Living and Working Conditions\"}],"
+                    + "\"q2\":[{\"id\":\"Q1377256\",\"name\":\"European Monitoring Centre for Drugs and Drug Addiction\"}]}";
+            server.enqueue(new MockResponse.Builder().body(jsonResponse).build());
+
+            prepareOptions(0, 0, true, true, "https://de.wikipedia.org/wiki/", server.url("endpoint").url().toString());
+            parse(input);
+
+            Assert.assertEquals(project.columnModel.columns.size(), 3);
+            Assert.assertEquals(project.rows.size(), 3);
+            Assert.assertEquals(project.rows.get(0).cells.size(), 3);
+
+            // Reconciled cells
+            Assert.assertEquals(project.rows.get(0).cells.get(1).value, "Cedefop");
+            Assert.assertEquals(project.rows.get(0).cells.get(1).recon, null);
+            Assert.assertEquals(project.rows.get(2).cells.get(0).value, "Europäische Beobachtungsstelle für Drogen und Drogensucht");
+            Assert.assertEquals(project.rows.get(2).cells.get(0).recon.getBestCandidate().id, "Q1377256");
+
+            // various ways to input external links
+            Assert.assertEquals(project.rows.get(1).cells.get(2).value, "http://www.eurofound.europa.eu/");
+            Assert.assertEquals(project.rows.get(2).cells.get(2).value, "http://www.emcdda.europa.eu/");
+            // Assert.assertEquals(project.rows.get(0).cells.get(2).value, "http://www.cedefop.europa.eu/");
+            // unfortunately the above does not seem to be supported by the parser (parsed as blank instead)
         }
-        Assert.assertEquals(project.columnModel.columns.size(), 3);
-        Assert.assertEquals(project.rows.size(), 3);
-        Assert.assertEquals(project.rows.get(0).cells.size(), 3);
-        
-        // Reconciled cells
-        Assert.assertEquals(project.rows.get(0).cells.get(1).value, "Cedefop");
-        Assert.assertEquals(project.rows.get(0).cells.get(1).recon, null);
-        Assert.assertEquals(project.rows.get(2).cells.get(0).value, "Europäische Beobachtungsstelle für Drogen und Drogensucht");
-        Assert.assertEquals(project.rows.get(2).cells.get(0).recon.getBestCandidate().id, "Q1377256");
-        
-        // various ways to input external links
-        Assert.assertEquals(project.rows.get(1).cells.get(2).value, "http://www.eurofound.europa.eu/");
-        Assert.assertEquals(project.rows.get(2).cells.get(2).value, "http://www.emcdda.europa.eu/");
-        // Assert.assertEquals(project.rows.get(0).cells.get(2).value, "http://www.cedefop.europa.eu/");
-        // unfortunately the above does not seem to be supported by the parser (parsed as blank instead)
     }
 
     @Test
     public void readStyledTableWithHeader() {
-        // Data credits: Wikipedia contributors, https://de.wikipedia.org/w/index.php?title=Agenturen_der_Europäischen_Union&action=edit
+        // Data credits: Wikipedia contributors,
+        // https://de.wikipedia.org/w/index.php?title=Agenturen_der_Europäischen_Union&action=edit
         String input = "\n"
-            +"==Agenturen==\n"
-            +"{| class=\"wikitable sortable\"\n"
-            +"! style=\"text-align:left; width: 60em\" | Offizieller Name\n"
-            +"! style=\"text-align:left; width: 9em\" | Abkürzung\n"
-            +"! style=\"text-align:left; width: 6em\" | Website\n"
-            +"! style=\"text-align:left; width: 15em\" | Standort\n"
-            +"! style=\"text-align:left; width: 18em\" | Staat\n"
-            +"! style=\"text-align:left; width: 6em\" | Gründung\n"
-            +"! style=\"text-align:left; width: 50em\" | Anmerkungen\n"
-            +"|-\n"
-            +"| [[Europäisches Zentrum für die Förderung der Berufsbildung]] || '''Cedefop''' || [http://www.cedefop.europa.eu/] || [[Thessaloniki]] || {{Griechenland}} || 1975 ||\n"
-            +"|-\n"
-            +"| [[Europäische Stiftung zur Verbesserung der Lebens- und Arbeitsbedingungen]] || ''EUROFOUND'' || [http://www.eurofound.europa.eu/] || [[Dublin]] || {{Irland}} || 1975 ||\n"
-            +"|-\n"
-            +"| [[Europäische Beobachtungsstelle für Drogen und Drogensucht]] || EMCDDA || [http://www.emcdda.europa.eu/] || [[Lissabon]] || {{Portugal}} || 1993 ||\n"
-            +"|-\n"
-            +"|}\n";
+                + "==Agenturen==\n"
+                + "{| class=\"wikitable sortable\"\n"
+                + "! style=\"text-align:left; width: 60em\" | Offizieller Name\n"
+                + "! style=\"text-align:left; width: 9em\" | Abkürzung\n"
+                + "! style=\"text-align:left; width: 6em\" | Website\n"
+                + "! style=\"text-align:left; width: 15em\" | Standort\n"
+                + "! style=\"text-align:left; width: 18em\" | Staat\n"
+                + "! style=\"text-align:left; width: 6em\" | Gründung\n"
+                + "! style=\"text-align:left; width: 50em\" | Anmerkungen\n"
+                + "|-\n"
+                + "| [[Europäisches Zentrum für die Förderung der Berufsbildung]] || '''Cedefop''' || [http://www.cedefop.europa.eu/] || [[Thessaloniki]] || {{Griechenland}} || 1975 ||\n"
+                + "|-\n"
+                + "| [[Europäische Stiftung zur Verbesserung der Lebens- und Arbeitsbedingungen]] || ''EUROFOUND'' || [http://www.eurofound.europa.eu/] || [[Dublin]] || {{Irland}} || 1975 ||\n"
+                + "|-\n"
+                + "| [[Europäische Beobachtungsstelle für Drogen und Drogensucht]] || EMCDDA || [http://www.emcdda.europa.eu/] || [[Lissabon]] || {{Portugal}} || 1993 ||\n"
+                + "|-\n"
+                + "|}\n";
 
-        try {
-           prepareOptions(-1, 1, true, true, null);
-           parse(input);
-        } catch (Exception e) {
-           Assert.fail("Parsing failed", e);
-        }
-        Assert.assertEquals(project.columnModel.columns.size(), 7);
-        Assert.assertEquals(project.rows.get(0).cells.get(0).value, "Europäisches Zentrum für die Förderung der Berufsbildung");
-        Assert.assertEquals(project.rows.get(0).cells.get(1).value, "Cedefop");
-        Assert.assertEquals(project.rows.get(1).cells.get(1).value, "EUROFOUND");
-        Assert.assertEquals(project.columnModel.columns.get(0).getName(), "Offizieller Name");
-        Assert.assertEquals(project.columnModel.columns.get(6).getName(), "Anmerkungen");
-        Assert.assertEquals(project.rows.get(0).cells.size(), 7);  
+        prepareOptions(-1, 1, true, true, null, null);
+        parse(input);
+
+        Project expectedProject = createProject(
+                new String[] { "Offizieller Name", "Abkürzung", "Website", "Standort", "Staat", "Gründung", "Anmerkungen" },
+                new Serializable[][] {
+                        { "Europäisches Zentrum für die Förderung der Berufsbildung", "Cedefop", "http://www.cedefop.europa.eu/",
+                                "Thessaloniki", "{{Griechenland}}", "1975", "" },
+                        { "Europäische Stiftung zur Verbesserung der Lebens- und Arbeitsbedingungen", "EUROFOUND",
+                                "http://www.eurofound.europa.eu/", "Dublin", "{{Irland}}", "1975", "" },
+                        { "Europäische Beobachtungsstelle für Drogen und Drogensucht", "EMCDDA", "http://www.emcdda.europa.eu/", "Lissabon",
+                                "{{Portugal}}", "1993", "" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
 
     @Test
     public void readTableWithSpanningCells() {
         // inspired from https://www.mediawiki.org/wiki/Help:Tables
         String input = "{| class=\"wikitable\"\n"
-        +"!colspan=\"6\"|Shopping List\n"
-        +"|-\n"
-        +"|Bread & Butter\n"
-        +"|Pie\n"
-        +"|Buns\n"
-        +"|rowspan=\"2\"|Danish\n"
-        +"|colspan=\"2\"|Croissant\n"
-        +"|-\n"
-        +"|Cheese\n"
-        +"|colspan=\"2\"|Ice cream\n"
-        +"|Butter\n"
-        +"|Yogurt\n"
-        +"|}\n";
-        
-        try {
-           prepareOptions(-1, 1, true, true, null);
-           parse(input);
-        } catch (Exception e) {
-           Assert.fail("Parsing failed", e);
-        }
-        Assert.assertEquals(project.columnModel.columns.size(), 6);
-        Assert.assertNull(project.rows.get(1).cells.get(2));
-        Assert.assertNull(project.rows.get(1).cells.get(3));
-        Assert.assertEquals(project.rows.get(1).cells.get(4).value, "Butter");
+                + "!colspan=\"6\"|Shopping List\n"
+                + "|-\n"
+                + "|Bread & Butter\n"
+                + "|Pie\n"
+                + "|Buns\n"
+                + "|rowspan=\"2\"|Danish\n"
+                + "|colspan=\"2\"|Croissant\n"
+                + "|-\n"
+                + "|Cheese\n"
+                + "|colspan=\"2\"|Ice cream\n"
+                + "|Butter\n"
+                + "|Yogurt\n"
+                + "|}\n";
+
+        prepareOptions(-1, 1, true, true, null, null);
+        parse(input);
+
+        Project expectedProject = createProject(
+                new String[] { "Shopping List", "Column", "Column2", "Column3", "Column4", "Column5" },
+                new Serializable[][] {
+                        { "Bread & Butter", "Pie", "Buns", "Danish", "Croissant", null },
+                        { "Cheese", "Ice cream", null, null, "Butter", "Yogurt" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
-    
+
     @Test
     public void readTableWithReferences() {
         // inspired from https://www.mediawiki.org/wiki/Help:Tables
         String input = "{|\n"
-        +"! price\n"
-        +"! fruit\n"
-        +"! merchant\n"
-        +"|-\n"
-        +"| a || b <ref name=\"myref\"> See [http://gnu.org here]</ref>  || c <ref name=\"ms\"> or http://microsoft.com/ </ref>\n"
-        +"|-\n"
-        +"| d || e <ref name=\"ms\"/>|| f <ref name=\"myref\" />\n"
-        +"|-\n"
-        +"|}\n";
-        
-        try {
-           prepareOptions(-1, 1, true, true, null);
-           parse(input);
-        } catch (Exception e) {
-           Assert.fail("Parsing failed", e);
-        }
-        Assert.assertEquals(project.columnModel.columns.size(), 5);
-        Assert.assertEquals(project.rows.get(0).cells.get(1).value, "b");
-        Assert.assertEquals(project.rows.get(0).cells.get(2).value, "http://gnu.org");
-        Assert.assertEquals(project.rows.get(0).cells.get(4).value, "http://microsoft.com/");
-        Assert.assertEquals(project.rows.get(1).cells.get(4).value, "http://gnu.org");
-        Assert.assertEquals(project.rows.get(1).cells.get(2).value, "http://microsoft.com/");
+                + "! price\n"
+                + "! fruit\n"
+                + "! merchant\n"
+                + "|-\n"
+                + "| a || b <ref name=\"myref\"> See [http://gnu.org here]</ref>  || c <ref name=\"ms\"> or http://microsoft.com/ </ref>\n"
+                + "|-\n"
+                + "| d || e <ref name=\"ms\"/>|| f <ref name=\"myref\" />\n"
+                + "|-\n"
+                + "|}\n";
+
+        prepareOptions(-1, 1, true, true, null, null);
+        parse(input);
+
+        Project expectedProject = createProject(
+                new String[] { "price", "fruit", "Column", "merchant", "Column2" },
+                new Serializable[][] {
+                        { "a", "b", "http://gnu.org", "c", "http://microsoft.com/" },
+                        { "d", "e", "http://microsoft.com/", "f", "http://gnu.org" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
 
     @Test
     public void readTableWithReferencesTemplates() {
         // inspired from https://www.mediawiki.org/wiki/Help:Tables
         String input = "{|\n"
-        +"! price\n"
-        +"! fruit\n"
-        +"! merchant\n"
-        +"|-\n"
-        +"| a || b <ref name=\"myref\">{{cite web|url=http://gnu.org|accessdate=2017-08-30}}</ref>  || c <ref name=\"ms\"> or {{cite journal|url=http://microsoft.com/|title=BLah}} </ref>\n"
-        +"|-\n"
-        +"| d || e <ref name=\"ms\"/>|| f <ref name=\"myref\" />\n"
-        +"|-\n"
-        +"|}\n";
-        
-        try {
-           prepareOptions(-1, 1, true, true, null);
-           parse(input);
-        } catch (Exception e) {
-           Assert.fail("Parsing failed", e);
-        }
-        Assert.assertEquals(project.columnModel.columns.size(), 5);
-        Assert.assertEquals(project.rows.get(0).cells.get(1).value, "b");
-        Assert.assertEquals(project.rows.get(0).cells.get(2).value, "http://gnu.org");
-        Assert.assertEquals(project.rows.get(0).cells.get(4).value, "http://microsoft.com/");
-        Assert.assertEquals(project.rows.get(1).cells.get(4).value, "http://gnu.org");
-        Assert.assertEquals(project.rows.get(1).cells.get(2).value, "http://microsoft.com/");
+                + "! price\n"
+                + "! fruit\n"
+                + "! merchant\n"
+                + "|-\n"
+                + "| a || b <ref name=\"myref\">{{cite web|url=http://gnu.org|accessdate=2017-08-30}}</ref>  || c <ref name=\"ms\"> or {{cite journal|url=http://microsoft.com/|title=BLah}} </ref>\n"
+                + "|-\n"
+                + "| d || e <ref name=\"ms\"/>|| f <ref name=\"myref\" />\n"
+                + "|-\n"
+                + "|}\n";
+
+        prepareOptions(-1, 1, true, true, null, null);
+        parse(input);
+
+        Project expectedProject = createProject(
+                new String[] { "price", "fruit", "Column", "merchant", "Column2" },
+                new Serializable[][] {
+                        { "a", "b", "http://gnu.org", "c", "http://microsoft.com/" },
+                        { "d", "e", "http://microsoft.com/", "f", "http://gnu.org" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
-    
+
     /**
      * Include templates and image filenames
      */
@@ -348,29 +306,29 @@ public class WikitextImporterTests extends ImporterTest {
                 + "| f<br>\n"
                 + "|-\n"
                 + "|}\n";
-        try {
-           prepareOptions(0, 0, true, true, null);
-           parse(input);
-        } catch (Exception e) {
-           Assert.fail("Parsing failed", e);
-        }
-        Assert.assertEquals(project.columnModel.columns.size(), 3);
-        Assert.assertEquals(project.rows.size(), 2);
-        Assert.assertEquals(project.rows.get(0).cells.size(), 3);
-        Assert.assertEquals(project.rows.get(0).cells.get(0).value, "{{free to read}}");
-        Assert.assertEquals(project.rows.get(1).cells.get(1).value, "[[File:My logo.svg]]");
+
+        prepareOptions(0, 0, true, true, null, null);
+        parse(input);
+
+        Project expectedProject = createProject(
+                new String[] { numberedColumn(1), numberedColumn(2), numberedColumn(3) },
+                new Serializable[][] {
+                        { "{{free to read}}", "b", "c" },
+                        { "d", "[[File:My logo.svg]]", "f" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
 
-    //--helpers--
-    
+    // --helpers--
+
     private void parse(String wikitext) {
-    	parseOneFile(importer, new StringReader(wikitext));
+        parseOneFile(importer, new StringReader(wikitext));
     }
 
     private void prepareOptions(
-        int limit, int headerLines, boolean blankSpanningCells,
-        boolean guessValueType, String wikiUrl) {
-        
+            int limit, int headerLines, boolean blankSpanningCells,
+            boolean guessValueType, String wikiUrl, String reconEndpoint) {
+
         whenGetIntegerOption("limit", options, limit);
         whenGetIntegerOption("headerLines", options, headerLines);
         whenGetBooleanOption("guessCellValueTypes", options, guessValueType);
@@ -379,6 +337,6 @@ public class WikitextImporterTests extends ImporterTest {
         whenGetBooleanOption("parseReferences", options, true);
         whenGetBooleanOption("includeRawTemplates", options, true);
         whenGetStringOption("wikiUrl", options, wikiUrl);
-        whenGetStringOption("reconService", options, "https://tools.wmflabs.org/openrefine-wikidata/en/api");
+        whenGetStringOption("reconService", options, reconEndpoint);
     }
 }

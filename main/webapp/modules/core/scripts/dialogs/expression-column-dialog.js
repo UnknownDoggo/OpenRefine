@@ -1,5 +1,5 @@
 
-var doTextTransform = function(columnName, expression, onError, repeat, repeatCount) {
+var doTextTransform = function(columnName, expression, onError, repeat, repeatCount, onDone) {
     Refine.postCoreProcess(
       "text-transform",
       {
@@ -10,7 +10,8 @@ var doTextTransform = function(columnName, expression, onError, repeat, repeatCo
         repeatCount: repeatCount
       },
       null,
-      { cellsChanged: true }
+      { cellsChanged: true, rowIdsPreserved: true },
+      { onDone }
     );
 };
 
@@ -64,19 +65,19 @@ ExpressionColumnDialog.prototype._createDialog = function() {
    * Hook up event handlers.
    */
   
-  this._elmts.columnList.find('.custom-tabular-exporter-dialog-column').click(function() {
+  this._elmts.columnList.find('.custom-tabular-exporter-dialog-column').on('click',function() {
     self._elmts.columnList.find('.custom-tabular-exporter-dialog-column').removeClass('selected');
     $(this).addClass('selected');
   });
-  this._elmts.selectAllButton.click(function() {
+  this._elmts.selectAllButton.on('click',function() {
     self._elmts.columnList.find('input[type="checkbox"]').prop('checked', true);
   });
-  this._elmts.deselectAllButton.click(function() {
+  this._elmts.deselectAllButton.on('click',function() {
     self._elmts.columnList.find('input[type="checkbox"]').prop('checked', false);
   });
   
-  this._elmts.okButton.click(function() { self._transform(); });
-  this._elmts.cancelButton.click(function() { self._dismiss(); });
+  this._elmts.okButton.on('click',function() { self._transform(); });
+  this._elmts.cancelButton.on('click',function() { self._dismiss(); });
 }  
   
 
@@ -87,7 +88,6 @@ ExpressionColumnDialog.prototype._dismiss = function() {
 
 ExpressionColumnDialog.prototype._transform = function() {
   this._postSelect();
-  this._dismiss();
 };
 
 ExpressionColumnDialog.prototype._postSelect = function() {
@@ -96,7 +96,7 @@ ExpressionColumnDialog.prototype._postSelect = function() {
     if ($(this).find('input[type="checkbox"]')[0].checked) {
       var name = this.getAttribute('column');
       // alert("doTextTransform on: " + name + "; expression: " + self._expression);
-	  doTextTransform(name, self._expression, self._onError, self._repeat, self._repeatCount)
+	  doTextTransform(name, self._expression, self._onError, self._repeat, self._repeatCount, self._dismiss)
     }
   });
   

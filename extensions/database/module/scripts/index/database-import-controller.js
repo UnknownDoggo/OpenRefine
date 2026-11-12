@@ -27,24 +27,7 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-//Internationalization init
-var lang = navigator.language.split("-")[0]
-    || navigator.userLanguage.split("-")[0];
-var dictionary = "";
-$.ajax({
-  url : "command/core/load-language?",
-  type : "POST",
-  async : false,
-  data : {
-    module : "database",
-  },
-  success : function(data) {
-    dictionary = data['dictionary'];
-    lang = data['lang'];
-  }
-});
-$.i18n().load(dictionary, lang);
-// End internationalization
+I18NUtil.init("database");
 
 Refine.DatabaseImportController = function(createProjectUI) {
   this._createProjectUI = createProjectUI;
@@ -131,13 +114,15 @@ Refine.DatabaseImportController.prototype.getOptions = function() {
     options.storeBlankRows = this._parsingPanelElmts.storeBlankRowsCheckbox[0].checked;
     options.storeBlankCellsAsNulls = this._parsingPanelElmts.storeBlankCellsAsNullsCheckbox[0].checked;
 
+    options.disableAutoPreview = this._parsingPanelElmts.disableAutoPreviewCheckbox[0].checked;
+
     return options;
 };
 
 Refine.DatabaseImportController.prototype._showParsingPanel = function() {
     var self = this;
 
-    this._parsingPanel.unbind().empty().html(
+    this._parsingPanel.off().empty().html(
         DOM.loadHTML("database",'scripts/index/database-parsing-panel.html'));
 
     this._parsingPanelElmts = DOM.bind(this._parsingPanel);
@@ -155,9 +140,10 @@ Refine.DatabaseImportController.prototype._showParsingPanel = function() {
     this._parsingPanelElmts.database_limit.html($.i18n('database-parsing/limit'));
     this._parsingPanelElmts.database_store_row.html($.i18n('database-parsing/store-row'));
     this._parsingPanelElmts.database_store_cell.html($.i18n('database-parsing/store-cell'));
+    this._parsingPanelElmts.database_disable_auto_preview.text($.i18n('database-parsing/disable-auto-preview'));
 
     if (this._parsingPanelResizer) {
-      $(window).unbind('resize', this._parsingPanelResizer);
+      $(window).off('resize', this._parsingPanelResizer);
     }
 
     this._parsingPanelResizer = function() {
@@ -185,10 +171,10 @@ Refine.DatabaseImportController.prototype._showParsingPanel = function() {
       .css("height", (controlPanelHeight - DOM.getVPaddings(elmts.controlPanel)) + "px");
     };
 
-    $(window).resize(this._parsingPanelResizer);
+    $(window).on('resize',this._parsingPanelResizer);
     this._parsingPanelResizer();
 
-    this._parsingPanelElmts.startOverButton.click(function() {
+    this._parsingPanelElmts.startOverButton.on('click',function() {
       // explicitly cancel the import job
       Refine.CreateProjectUI.cancelImportingJob(self._jobID);
 
@@ -198,8 +184,8 @@ Refine.DatabaseImportController.prototype._showParsingPanel = function() {
       self._createProjectUI.showSourceSelectionPanel();
     });
 
-    this._parsingPanelElmts.createProjectButton.click(function() { self._createProject(); });
-    this._parsingPanelElmts.previewButton.click(function() { self._updatePreview(); });
+    this._parsingPanelElmts.createProjectButton.on('click',function() { self._createProject(); });
+    this._parsingPanelElmts.previewButton.on('click',function() { self._updatePreview(); });
     //alert("datetime::" + $.now());
     //this._parsingPanelElmts.projectNameInput[0].value = this._queryInfo.connectionName + "_" + this._queryInfo.databaseUser + "_" + $.now();
     this._parsingPanelElmts.projectNameInput[0].value = this._queryInfo.databaseServer +  "_" + this._queryInfo.initialDatabase + "_" + $.now();
@@ -220,11 +206,19 @@ Refine.DatabaseImportController.prototype._showParsingPanel = function() {
       this._parsingPanelElmts.storeBlankCellsAsNullsCheckbox.prop("checked", true);
     }
 
+    if (this._options.disableAutoPreview) {
+      this._parsingPanelElmts.disableAutoPreviewCheckbox.prop('checked', true);
+    }
+
+    // If disableAutoPreviewCheckbox is not checked, we will schedule an automatic update
     var onChange = function() {
-      self._scheduleUpdatePreview();
+      if (!self._parsingPanelElmts.disableAutoPreviewCheckbox[0].checked)
+      {
+        self._scheduleUpdatePreview();
+      }
     };
-    this._parsingPanel.find("input").bind("change", onChange);
-    this._parsingPanel.find("select").bind("change", onChange);
+    this._parsingPanel.find("input").on("change", onChange);
+    this._parsingPanel.find("select").on("change", onChange);
 
     this._createProjectUI.showCustomPanel(this._parsingPanel);
     this._updatePreview();
@@ -268,7 +262,7 @@ Refine.DatabaseImportController.prototype._updatePreview = function() {
                 self._parsingPanelElmts.progressPanel.hide();
                 self._parsingPanelElmts.dataPanel.show();
 
-                new Refine.PreviewTable(projectData, self._parsingPanelElmts.dataPanel.unbind().empty());
+                new Refine.PreviewTable(projectData, self._parsingPanelElmts.dataPanel.off().empty());
             });
             } else {
 
@@ -315,7 +309,7 @@ Refine.DatabaseImportController.prototype._getPreviewData = function(callback, n
             result.rowModel = data;
             callback(result);
           },
-          "jsonp"
+          "json"
         );
       },
       "json"
@@ -323,7 +317,7 @@ Refine.DatabaseImportController.prototype._getPreviewData = function(callback, n
 };
 
 Refine.DatabaseImportController.prototype._createProject = function() {
-    var projectName = $.trim(this._parsingPanelElmts.projectNameInput[0].value);
+    var projectName = jQueryTrim(this._parsingPanelElmts.projectNameInput[0].value);
     if (projectName.length == 0) {
       window.alert("Please name the project.");
       this._parsingPanelElmts.projectNameInput.focus();

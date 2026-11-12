@@ -46,7 +46,7 @@ function ProcessPanel(div) {
   this._elmts.undoLink.html($.i18n('core-project/undo'));
   
   var self = this;
-  $(window).keypress(function(evt) {
+  $(window).on('keypress',function(evt) {
     if (evt.charCode == 26 || (evt.charCode == 122 && (evt.ctrlKey || evt.metaKey))) { // ctrl-z or meta-z
       var t = evt.target;
       if (t) {
@@ -92,23 +92,36 @@ ProcessPanel.prototype.update = function(updateOptions, onDone) {
 };
 
 ProcessPanel.prototype.showUndo = function(historyEntry) {
-  var self = this;
-
   this._latestHistoryEntry = historyEntry;
+  this.showNotificationWithUndo(historyEntry.description);
+};
 
-  truncDescription = historyEntry.description.length > 250 ?
-  	historyEntry.description.substring(0, 250) + " ..." : historyEntry.description  
+ProcessPanel.prototype.showNotificationWithUndo = function(description) {
+  var self = this;
+  var truncDescription = description.length > 250 ?
+  	description.substring(0, 250) + " ..." : description;
 
   this._div.stop(true, false);
   this._elmts.progressDiv.hide();
   this._elmts.undoDiv.show();
-  this._elmts.undoDescription.text( truncDescription );
-  this._elmts.undoLink.unbind().click(function() { self.undo(); });
+  this._elmts.undoDescription.text(truncDescription);
+  this._elmts.undoLink.off().on('click',function() { self.undo(); });
   
   this._div
     .fadeIn(200)
     .delay(10000)
     .fadeOut(200);
+};
+
+ProcessPanel.prototype.showMultipleUndo = function(historyEntries) {
+  var self = this;
+
+  if (historyEntries.length === 1) {
+    self.showUndo(historyEntries[0]);
+  } else if (historyEntries.length > 1) {
+    this._latestHistoryEntry = historyEntries[0];
+    this.showNotificationWithUndo($.i18n('core-project/applied-n-operations', historyEntries.length));
+  }
 };
 
 ProcessPanel.prototype.undo = function() {
@@ -117,7 +130,7 @@ ProcessPanel.prototype.undo = function() {
         "undo-redo",
         { undoID: this._latestHistoryEntry.id },
         null,
-        { everythingChanged: true }
+        { everythingChanged: true, warnAgainstHistoryErasure: false }
     );
   }
 };
@@ -169,11 +182,11 @@ ProcessPanel.prototype._render = function(newData) {
       this._elmts.countSpan.empty();
     }
     this._elmts.cancelLink
-      .unbind()
+      .off()
       .text($.i18n('core-project/cancel-all', processes.length))
-      .click(function() {
+      .on('click',function() {
         self._cancelAll();
-        $(this).text($.i18n('core-project/canceling')).unbind();
+        $(this).text($.i18n('core-project/canceling')).off();
       });
     
     this._div.fadeIn(200);
@@ -230,7 +243,8 @@ ProcessPanel.prototype._perform = function(jobs) {
         ui.browsingEngine.addFacet(
             job.facetType,
             job.facetConfig,
-            job.facetOptions
+            job.facetOptions,
+            true
         );
       } catch (e) {
         //

@@ -41,29 +41,28 @@ function BrowsingEngine(div, facetConfigs) {
   if (facetConfigs.length > 0) {
     for (var i = 0; i < facetConfigs.length; i++) {
       var facetConfig = facetConfigs[i];
-      var type = facetConfig.c.type;
-
       var elmt = this._createFacetContainer();
-      var facet;
-      switch (type) {
-      case "range":
-        facet = RangeFacet.reconstruct(elmt, facetConfig);
-        break;
-      case "timerange":
-        facet = TimeRangeFacet.reconstruct(elmt, facetConfig);
-        break;
-      case "scatterplot":
-        facet = ScatterplotFacet.reconstruct(elmt, facetConfig);
-        break;
-      case "text":
-        facet = TextSearchFacet.reconstruct(elmt, facetConfig);
-        break;
-      default:
-        facet = ListFacet.reconstruct(elmt, facetConfig);
-      }
+      var facet = this._createFacet(elmt, facetConfig);
 
       this._facets.push({ elmt: elmt, facet: facet });
+      facet.prepareUI();
     }
+  }
+}
+
+BrowsingEngine.prototype._createFacet = function(elmt, uiState, options) {
+  var type = uiState.c.type;
+  switch (type) {
+    case "range":
+      return RangeFacet.reconstruct(elmt, uiState, options);
+    case "timerange":
+      return TimeRangeFacet.reconstruct(elmt, uiState, options);
+    case "scatterplot":
+      return ScatterplotFacet.reconstruct(elmt, uiState, options);
+    case "text":
+      return TextSearchFacet.reconstruct(elmt, uiState, options);
+    default:
+      return ListFacet.reconstruct(elmt, uiState, options);
   }
 }
 
@@ -123,9 +122,9 @@ BrowsingEngine.prototype._initializeUI = function() {
     }
   });
 
-  this._elmts.refreshLink.click(function() { self.update(); });
-  this._elmts.resetLink.click(function() { self.reset(); });
-  this._elmts.removeLink.click(function() { self.remove(); });
+  this._elmts.refreshLink.on('click',function() { self.update(); });
+  this._elmts.resetLink.on('click',function() { self.reset(); });
+  this._elmts.removeLink.on('click',function() { self.remove(); });
 };
 
 BrowsingEngine.prototype._updateFacetOrder = function() {
@@ -168,29 +167,60 @@ BrowsingEngine.prototype.getJSON = function(keepUnrestrictedFacets, except) {
   return a;
 };
 
-BrowsingEngine.prototype.addFacet = function(type, config, options) {
+BrowsingEngine.prototype.setJSON = function(engineConfig, updateLater) {
+  this._mode = engineConfig.mode;
+  
+  for (var i = 0; i < this._facets.length; i++) {
+    this._facets[i].facet.dispose();
+    this._facets[i].elmt.remove();
+  }
+
+  this._facets = [];
+
+  var facetConfigs = engineConfig.facets;
+  for (var i = 0; i < facetConfigs.length; i++) {
+    var facetConfig = facetConfigs[i];
+    var elmt = this._createFacetContainer();
+    var facet = this._createFacet(elmt, {c: facetConfig});
+
+    this._facets.push({ elmt: elmt, facet: facet });
+    facet.prepareUI();
+  }
+  if (!updateLater) {
+    Refine.update({ engineChanged: true });
+  }
+};
+
+
+BrowsingEngine.prototype.addFacet = function(type, config, options, avoidDuplicates) {
   var elmt = this._createFacetContainer();
-  var facet;
-  switch (type) {
-  case "range":
-    facet = new RangeFacet(elmt, config, options);
-    break;
-  case "timerange":
-    facet = new TimeRangeFacet(elmt, config, options);
-    break;
-  case "scatterplot":
-    facet = new ScatterplotFacet(elmt, config, options);
-    break;
-  case "text":
-    facet = new TextSearchFacet(elmt, config, options);
-    break;
-  default:
-    facet = new ListFacet(elmt, config, options);
+  config.type = type;
+  var facet = this._createFacet(elmt, {c: config}, options);
+
+  if (avoidDuplicates) {
+    let criterion = facet.uniquenessCriterion();
+    if (this._facets.findIndex(existingFacet => existingFacet.facet.uniquenessCriterion() == criterion) != -1) {
+      // skip addition of the facet because it already exists
+      return;
+    }
   }
 
   this._facets.push({ elmt: elmt, facet: facet });
+  facet.prepareUI();
 
   ui.leftPanelTabs.tabs();
+  ui.leftPanelTabs.on( "tabsactivate", ( event, ui ) =>  {
+     let activeTabId = ui.newTab.children('a').attr("href");
+     if (activeTabId === '#refine-tabs-facets') {
+       for (let facet of this._facets) {
+         if (facet.facet.render) {
+           facet.facet.render();
+         } else if (facet.facet.checkInitialHeight) {
+           facet.facet.checkInitialHeight();
+         }
+       }
+     }
+  });
 
   Refine.update({ engineChanged: true });
 };
@@ -240,10 +270,10 @@ BrowsingEngine.prototype.update = function(onDone) {
   this._elmts.help.hide();
 
   this._elmts.header.show();
-  this._elmts.controls.css("visibility", "hidden");
+  this._elmts.controls.css("display", "none");
   this._elmts.indicator.css("display", "block");
 
-  $.post(
+  Refine.postCSRF(
     "command/core/compute-facets?" + $.param({ project: theProject.id }),
     { engine: JSON.stringify(this.getJSON(true)) },
     function(data) {
@@ -261,14 +291,15 @@ BrowsingEngine.prototype.update = function(onDone) {
       var facetData = data.facets;
 
       for (var i = 0; i < facetData.length; i++) {
-        self._facets[i].facet.updateState(facetData[i]);
+        const column = theProject.columnModel.columns.find(col => col.name === facetData[i].columnName);
+        self._facets[i].facet.updateState(facetData[i], column);
       }
 
       self._elmts.indicator.css("display", "none");
       self._elmts.errors.css("display", "none");
       if (self._facets.length > 0) {
         self._elmts.header.show();
-        self._elmts.controls.css("visibility", "visible");
+        self._elmts.controls.css("display", "block");
 
         self.resize();
       } else {

@@ -87,7 +87,7 @@ class ScatterplotFacet extends Facet {
 
     this._div.empty().show().html(
       '<div class="facet-title">' +
-        '<div class="grid-layout layout-tightest layout-full"><table><tr>' +
+        '<div class="grid-layout layout-tightest layout-full"><table role="presentation"><tr>' +
           '<td width="1%">' +
             '<a href="javascript:{}" title="'+$.i18n('core-facets/remove-facet')+'" class="facet-title-remove" bind="removeButton">&nbsp;</a>' +
           '</td>' +
@@ -102,7 +102,7 @@ class ScatterplotFacet extends Facet {
       '</div>' +
       '<div class="facet-scatterplot-body" bind="bodyDiv">' +
         '<div class="facet-scatterplot-message" bind="messageDiv">'+$.i18n('core-facets/loading')+'</div>' +
-        '<table width="100%"><tr>' + 
+        '<table role="presentation" width="100%"><tr>' + 
           '<td>' +
             '<div class="facet-scatterplot-plot-container">' +
             '<div class="facet-scatterplot-plot" bind="plotDiv">' +
@@ -137,21 +137,23 @@ class ScatterplotFacet extends Facet {
     this._elmts = DOM.bind(this._div);
 
     this._elmts.titleSpan.text(this._config.name);
-    this._elmts.removeButton.click(function() { self._remove(); });
-    this._elmts.minimizeButton.click(function() { self._minimize(); });
+    this._elmts.removeButton.on('click',function() { self._remove(); });
+    this._elmts.minimizeButton.on('click',function() { self._minimize(); });
     
-    this._elmts.resetButton.click(function() {
+    this._elmts.resetButton.on('click',function() {
       self.reset();
       self._updateRest();
     });
 
     this._elmts.plotDiv.width(this._config.l + "px").height(this._config.l + "px");
-    this._elmts.plotBaseImg.attr("src", this._formulateBaseImageUrl())
-    .attr("width", this._config.l)
-    .attr("height", this._config.l);
-    this._elmts.plotImg.attr("src", this._formulateCurrentImageUrl())
-    .attr("width", this._config.l)
-    .attr("height", this._config.l);
+    Refine.wrapCSRF(function(csrfToken) {
+      self._elmts.plotBaseImg.attr("src", self._formulateBaseImageUrl(csrfToken))
+        .attr("width", self._config.l)
+        .attr("height", self._config.l);
+      self._elmts.plotImg.attr("src", self._formulateCurrentImageUrl(csrfToken))
+        .attr("width", self._config.l)
+        .attr("height",self._config.l);
+    });
 
     var ops = {
         instance: true,        
@@ -189,7 +191,7 @@ class ScatterplotFacet extends Facet {
       this._elmts.selectors.find("#" + facet_id + "-dot-regular").prop('checked', true);
     }
 
-    this._elmts.selectors.find(".scatterplot-dim-selector").change(function() {
+    this._elmts.selectors.find(".scatterplot-dim-selector").on('change',function() {
       var dim = $(this).find("input:checked").val();
       self._config.dim_x = dim;
       self._config.dim_y = dim;
@@ -198,14 +200,14 @@ class ScatterplotFacet extends Facet {
       self.changePlot();
     });
 
-    this._elmts.selectors.find(".scatterplot-rot-selector").change(function() {
+    this._elmts.selectors.find(".scatterplot-rot-selector").on('change',function() {
       self._config.r = $(this).find("input:checked").val();
       self.reset();
       self._updateRest();
       self.changePlot();        
     });
 
-    this._elmts.selectors.find(".scatterplot-dot-selector").change(function() {
+    this._elmts.selectors.find(".scatterplot-dot-selector").on('change',function() {
       var dot_size = $(this).find("input:checked").val();
       if (dot_size == "small") {
         self._config.dot = 0.4;
@@ -217,9 +219,9 @@ class ScatterplotFacet extends Facet {
       self.changePlot();
     });
 
-    this._elmts.selectors.find(".buttonset").buttonset();
+    this._elmts.selectors.find(".buttonset").controlgroup();
     
-    //the function buttonset() groups the input buttons into one but in doing so it creates icon on the input button
+    //the function controlgroup() groups the input buttons into one but in doing so it creates icon on the input button
     //the icon is created using checkboxradio() 
     //to get rid of the icon a class "no-icon" is directly applied to input button and checkboxradio() is called again with option :- icon=false  
     $(".no-icon").checkboxradio("option", "icon", false);
@@ -252,19 +254,19 @@ class ScatterplotFacet extends Facet {
     }
   };
 
-  _formulateCurrentImageUrl() {
-    return this._formulateImageUrl(ui.browsingEngine.getJSON(false, this), { color: "ff6a00" });
+  _formulateCurrentImageUrl(csrfToken) {
+    return this._formulateImageUrl(ui.browsingEngine.getJSON(false, this), { color: "ff6a00" }, csrfToken);
   };
 
-  _formulateBaseImageUrl() {
-    return this._formulateImageUrl({},{ color: "888888", dot : this._config.dot * 0.9 });
+  _formulateBaseImageUrl(csrfToken) {
+    return this._formulateImageUrl({},{ color: "888888", dot : this._config.dot * 0.9 }, csrfToken);
   };
 
-  _formulateExportImageUrl() {
-    return this._formulateImageUrl(ui.browsingEngine.getJSON(false, this), { dot : this._config.dot * 5, l: 500, base_color: "888888" });
+  _formulateExportImageUrl(csrfToken) {
+    return this._formulateImageUrl(ui.browsingEngine.getJSON(false, this), { dot : this._config.dot * 5, l: 500, base_color: "888888" }, csrfToken);
   };
 
-  _formulateImageUrl(engineConfig, conf) {
+  _formulateImageUrl(engineConfig, conf, csrfToken) {
     var options = {};
     for (var p in this._config) {
       if (this._config.hasOwnProperty(p)) {        
@@ -279,10 +281,22 @@ class ScatterplotFacet extends Facet {
     var params = {
         project: theProject.id,
         engine: JSON.stringify(engineConfig), 
-        plotter: JSON.stringify(options) 
+        plotter: JSON.stringify(options),
+        csrf_token: csrfToken 
     };
     return "command/core/get-scatterplot?" + $.param(params);
   };
+
+  uniquenessCriterion() {
+    return JSON.stringify([
+      'scatterplot',
+      this._config.ex, // expression for X
+      this._config.cx, // columnName for X
+      this._config.ey, // expression for Y
+      this._config.cy, // column name for Y
+      this._config.r // rotation
+    ]);
+  }
 
   updateState(data) {
     if ("error" in data) {
@@ -326,9 +340,12 @@ class ScatterplotFacet extends Facet {
   };
 
   changePlot() {
-    this._elmts.plotBaseImg.attr("src", this._formulateBaseImageUrl());
-    this._elmts.plotImg.attr("src", this._formulateCurrentImageUrl());
-    this._elmts.exportPlotLink.attr("href", this._formulateExportImageUrl());
+    let self = this;
+    Refine.wrapCSRF(function(csrfToken) {
+      self._elmts.plotBaseImg.attr("src", self._formulateBaseImageUrl(csrfToken));
+      self._elmts.plotImg.attr("src", self._formulateCurrentImageUrl(csrfToken));
+      self._elmts.exportPlotLink.attr("href", self._formulateExportImageUrl(csrfToken));
+    });
   };
 
   render() {
@@ -348,8 +365,11 @@ class ScatterplotFacet extends Facet {
     this._elmts.plotDiv.show();
     this._elmts.statusDiv.show();
 
-    this._elmts.plotImg.attr("src", this._formulateCurrentImageUrl());
-    this._elmts.exportPlotLink.attr("href", this._formulateExportImageUrl());
+    let self = this;
+    Refine.wrapCSRF(function(csrfToken) {
+      self._elmts.plotImg.attr("src", self._formulateCurrentImageUrl(csrfToken));
+      self._elmts.exportPlotLink.attr("href", self._formulateExportImageUrl(csrfToken));
+    });
   };
 
   _updateRest() {

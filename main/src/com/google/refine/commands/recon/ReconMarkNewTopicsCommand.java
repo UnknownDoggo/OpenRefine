@@ -42,15 +42,29 @@ import com.google.refine.model.Project;
 import com.google.refine.operations.recon.ReconMarkNewTopicsOperation;
 
 public class ReconMarkNewTopicsCommand extends EngineDependentCommand {
-    
+
     @Override
     protected AbstractOperation createOperation(Project project,
             HttpServletRequest request, EngineConfig engineConfig) throws Exception {
-        
+
+        String service = request.getParameter("service");
+        if (service != null && (service.isEmpty() || "null".equals("service"))) {
+            service = null;
+        }
+        String identifierSpace = request.getParameter("identifierSpace");
+        if (identifierSpace != null && (identifierSpace.isEmpty() || "null".equals(identifierSpace))) {
+            identifierSpace = null;
+        }
+        String schemaSpace = request.getParameter("schemaSpace");
+        if (schemaSpace != null && (schemaSpace.isEmpty() || "null".equals(schemaSpace))) {
+            schemaSpace = null;
+        }
         return new ReconMarkNewTopicsOperation(
-            engineConfig, 
-            request.getParameter("columnName"),
-            "true".equals(request.getParameter("shareNewTopics"))
-        );
+                engineConfig,
+                request.getParameter("columnName"),
+                "true".equals(request.getParameter("shareNewTopics")),
+                service,
+                identifierSpace,
+                schemaSpace);
     }
 }

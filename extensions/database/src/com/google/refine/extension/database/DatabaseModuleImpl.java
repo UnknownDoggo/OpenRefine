@@ -26,6 +26,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 package com.google.refine.extension.database;
 
 import java.io.BufferedInputStream;
@@ -35,99 +36,125 @@ import java.util.Properties;
 
 import javax.servlet.ServletConfig;
 
+import edu.mit.simile.butterfly.ButterflyModuleImpl;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import edu.mit.simile.butterfly.ButterflyModuleImpl;
-
-
 public class DatabaseModuleImpl extends ButterflyModuleImpl {
-    
-    private static final Logger logger = LoggerFactory.getLogger("DatabaseModuleImpl");
-    
-    public static DatabaseModuleImpl instance;
-    
-    public static Properties extensionProperties;
-    
-    private static String DEFAULT_CREATE_PROJ_BATCH_SIZE = "100";
-    private static String DEFAULT_PREVIEW_BATCH_SIZE = "100";
-    
 
+    private static final Logger logger = LoggerFactory.getLogger("DatabaseModuleImpl");
+
+    public static DatabaseModuleImpl instance;
+
+    public static Properties extensionProperties;
+
+    static final int DEFAULT_CREATE_BATCH_SIZE = 100;
+    static final int DEFAULT_PREVIEW_BATCH_SIZE = 100;
 
     @Override
     public void init(ServletConfig config)
             throws Exception {
         // TODO Auto-generated method stub
         super.init(config);
-        
-        
-        readModuleProperty(); 
-        
-         // Set the singleton.
+
+        readModuleProperty();
+
+        // Set the singleton.
         instance = this;
-       
+
         logger.trace("Database Extension module initialization completed");
     }
-    
-    public static String getImportCreateBatchSize() {
-        if(extensionProperties == null) {
-            return DEFAULT_CREATE_PROJ_BATCH_SIZE;
-        }
-        return extensionProperties.getProperty("create.batchSize", DEFAULT_CREATE_PROJ_BATCH_SIZE);
+
+    public static int getCreateBatchSize() {
+        return getBatchSize("create.batchSize", DEFAULT_CREATE_BATCH_SIZE);
     }
 
-    public static String getImportPreviewBatchSize() {
-        if(extensionProperties == null) {
-            return DEFAULT_PREVIEW_BATCH_SIZE;
+    public static int getPreviewBatchSize() {
+        return getBatchSize("preview.batchSize", DEFAULT_PREVIEW_BATCH_SIZE);
+    }
+
+    private static int getBatchSize(String propertyName, int defaultValue) {
+        if (extensionProperties == null) {
+            return defaultValue;
         }
-        return extensionProperties.getProperty("preview.batchSize", DEFAULT_PREVIEW_BATCH_SIZE);
+
+        String propBatchSize = extensionProperties.getProperty(propertyName);
+        if (propBatchSize == null || propBatchSize.isEmpty()) {
+            return defaultValue;
+        }
+
+        try {
+            int batchSize = Integer.parseInt(propBatchSize);
+
+            if (batchSize > 0) {
+                return batchSize;
+            }
+        } catch (NumberFormatException nfe) {
+            logger.warn("Error parsing {} property as Integer ({})", propertyName, propBatchSize);
+        }
+
+        return defaultValue;
+    }
+
+    /**
+     * @deprecated use {@link #getCreateBatchSize()} instead.
+     */
+    @Deprecated(since = "3.10")
+    public static String getImportCreateBatchSize() {
+        return String.valueOf(getCreateBatchSize());
+    }
+
+    /**
+     * @deprecated use {@link #getPreviewBatchSize()} instead.
+     */
+    @Deprecated(since = "3.10")
+    public static String getImportPreviewBatchSize() {
+        return String.valueOf(getPreviewBatchSize());
     }
 
     private void readModuleProperty() {
         // The module path
         File f = getPath();
-        if(logger.isDebugEnabled()) {
+        if (logger.isDebugEnabled()) {
             logger.debug("Module getPath(): {}", f.getPath());
         }
 
         // Load our custom properties.
-        File modFile = new File(f,"MOD-INF");
-        if(logger.isDebugEnabled()) {
+        File modFile = new File(f, "MOD-INF");
+        if (logger.isDebugEnabled()) {
             logger.debug("Module File: {}", modFile.getPath());
         }
-        
+
         if (modFile.exists()) {
 
-            extensionProperties = loadProperties (new File(modFile,"dbextension.properties"));
+            extensionProperties = loadProperties(new File(modFile, "dbextension.properties"));
 
         }
-        
+
     }
-    
+
     private Properties loadProperties(File propFile) {
         Properties ps = new Properties();
         try {
             if (propFile.exists()) {
-                if(logger.isDebugEnabled()) {
+                if (logger.isDebugEnabled()) {
                     logger.debug("Loading Extension properties ({})", propFile);
                 }
-                BufferedInputStream stream = null;
-                try {
-                     ps = new Properties();
-                    stream = new BufferedInputStream(new FileInputStream(propFile));
-                    ps.load(stream);
 
-                } finally {
-                    // Close the stream.
-                    if (stream != null) stream.close();
+                try (final BufferedInputStream stream = new BufferedInputStream(new FileInputStream(propFile))) {
+                    ps = new Properties();
+                    ps.load(stream);
                 }
 
             }
         } catch (Exception e) {
             logger.error("Error loading Database properties", e);
+            /*
+             * During an exception reading 'dbextension.properties' (security or no permissions for example) the try
+             * with resources will autoclose the stream for us. And then we log the exception.
+             */
         }
         return ps;
     }
-    
-  
+
 }

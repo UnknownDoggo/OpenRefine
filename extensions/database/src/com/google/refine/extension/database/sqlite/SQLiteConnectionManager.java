@@ -29,22 +29,25 @@
 
 package com.google.refine.extension.database.sqlite;
 
-import com.google.refine.extension.database.DatabaseConfiguration;
-import com.google.refine.extension.database.DatabaseServiceException;
-import com.google.refine.extension.database.SQLType;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import java.io.File;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import com.google.refine.extension.database.DatabaseConfiguration;
+import com.google.refine.extension.database.DatabaseServiceException;
+import com.google.refine.extension.database.SQLType;
 
 public class SQLiteConnectionManager {
 
     private static final Logger logger = LoggerFactory.getLogger("SQLiteConnectionManager");
     private static SQLiteConnectionManager instance;
     private final SQLType type;
-    private Connection connection;
 
     private SQLiteConnectionManager() {
         type = SQLType.forName(SQLiteDatabaseService.DB_NAME);
@@ -66,7 +69,25 @@ public class SQLiteConnectionManager {
     }
 
     public static String getDatabaseUrl(DatabaseConfiguration dbConfig) {
-        return "jdbc:" + dbConfig.getDatabaseType().toLowerCase() + ":" + dbConfig.getDatabaseName();
+        String dbPath = dbConfig.getDatabaseName();
+        if (dbPath.contains("?")) {
+            throw new IllegalArgumentException("Paths to SQLite databases are not allowed to contain '?'");
+        }
+        if (dbPath.startsWith("//") || dbPath.startsWith("\\\\") || dbPath.startsWith("\\/") || dbPath.startsWith("/\\")) {
+            throw new IllegalArgumentException("File path starts with illegal prefix; only local files are accepted.");
+        }
+        if (!new File(dbPath).isFile()) {
+            throw new IllegalArgumentException("File could not be read: " + dbPath);
+        }
+        try {
+            URI uri = new URI(
+                    "jdbc:" + dbConfig.getDatabaseType().toLowerCase(),
+                    dbPath + "?open_mode=1&limit_attached=0", // open_mode=1 means read-only
+                    null);
+            return uri.toASCIIString();
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException(e);
+        }
     }
 
     /**
@@ -85,56 +106,31 @@ public class SQLiteConnectionManager {
      * @return boolean
      */
     public boolean testConnection(DatabaseConfiguration dbConfig) throws DatabaseServiceException {
-        try {
-            boolean connResult = false;
-
-            Connection conn = getConnection(dbConfig);
-            if (conn != null) {
-                connResult = true;
-                conn.close();
-            }
-
-            return connResult;
-        } catch (SQLException e) {
-            logger.error("Test connection Failed!", e);
-            throw new DatabaseServiceException(true, e.getSQLState(), e.getErrorCode(), e.getMessage());
-        }
+        Connection conn = getConnection(dbConfig);
+        return conn != null;
     }
 
     /**
-     * Get a connection form the connection pool.
+     * Get a connection from the connection pool.
      *
      * @return connection from the pool
      */
     public Connection getConnection(DatabaseConfiguration databaseConfiguration) throws DatabaseServiceException {
         try {
-            if (connection != null) {
-                connection.close();
-            }
-
-            Class.forName(type.getClassPath());
             String dbURL = getDatabaseUrl(databaseConfiguration);
-            connection = DriverManager.getConnection(dbURL);
-
+            Connection connection = DriverManager.getConnection(dbURL);
             logger.debug("*** Acquired New  connection for ::{} **** ", dbURL);
-
             return connection;
-        } catch (ClassNotFoundException e) {
-            logger.error("Jdbc Driver not found", e);
-            throw new DatabaseServiceException(e.getMessage());
         } catch (SQLException e) {
             logger.error("SQLException::Couldn't get a Connection!", e);
-            throw new DatabaseServiceException(true, e.getSQLState(), e.getErrorCode(), e.getMessage());
+            throw new DatabaseServiceException(e);
         }
     }
 
+    /**
+     * @deprecated for 3.10. No longer does anything and will be removed.
+     */
+    @Deprecated(since = "3.10")
     public void shutdown() {
-        if (connection != null) {
-            try {
-                connection.close();
-            } catch (SQLException e) {
-                logger.warn("Non-Managed connection could not be closed. Whoops!", e);
-            }
-        }
     }
 }

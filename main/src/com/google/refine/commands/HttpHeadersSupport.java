@@ -39,6 +39,8 @@ import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.hc.core5.http.HttpHeaders;
+
 import com.google.refine.RefineServlet;
 
 abstract public class HttpHeadersSupport {
@@ -46,13 +48,14 @@ abstract public class HttpHeadersSupport {
     static final protected Map<String, HttpHeaderInfo> s_headers = new HashMap<String, HttpHeaderInfo>();
 
     static public class HttpHeaderInfo {
+
         @JsonIgnore
-        final public String                 name;
+        final public String name;
         @JsonProperty("header")
-        final public String                 header;
+        final public String header;
         @JsonProperty("defaultValue")
-        final public String                 defaultValue;
-        
+        final public String defaultValue;
+
         HttpHeaderInfo(String header, String defaultValue) {
             this.name = header.toLowerCase();
             this.header = header;
@@ -61,11 +64,15 @@ abstract public class HttpHeadersSupport {
     }
 
     static {
-        registerHttpHeader("User-Agent", RefineServlet.FULLNAME);
-        registerHttpHeader("Accept", "*/*");
-        registerHttpHeader("Authorization", "");
+        registerHttpHeader(HttpHeaders.USER_AGENT, RefineServlet.FULLNAME);
+        registerHttpHeader(HttpHeaders.ACCEPT, "*/*");
+        registerHttpHeader(HttpHeaders.AUTHORIZATION, "");
+        registerHttpHeader(HttpHeaders.ACCEPT_CHARSET, "");
+        registerHttpHeader(HttpHeaders.ACCEPT_ENCODING, "");
+        registerHttpHeader(HttpHeaders.ACCEPT_LANGUAGE, "");
+        registerHttpHeader(HttpHeaders.IF_MODIFIED_SINCE, "");
     }
-    
+
     /**
      * @param header
      * @param defaultValue
@@ -73,11 +80,11 @@ abstract public class HttpHeadersSupport {
     static public void registerHttpHeader(String header, String defaultValue) {
         s_headers.put(header.toLowerCase(), new HttpHeaderInfo(header, defaultValue));
     }
-    
+
     static public HttpHeaderInfo getHttpHeaderInfo(String header) {
         return s_headers.get(header.toLowerCase());
     }
-    
+
     static public Set<String> getHttpHeaderLabels() {
         return s_headers.keySet();
     }

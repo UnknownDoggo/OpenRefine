@@ -1,8 +1,8 @@
-<div class="dialog-frame" style="width: 80%;" >
+<div class="dialog-frame text-transform-dialog" style="min-width: min(700px, 92vw);">
   <div class="dialog-border">
     <div class="dialog-header" bind="dialogHeader"></div>
     <div class="dialog-body" bind="dialogBody">
-      <div class="grid-layout layout-tight layout-full"><table>
+      <div class="grid-layout layout-tight layout-full"><table role="presentation">
         <tr><td colspan="3">$EXPRESSION_PREVIEW_WIDGET$</td></tr>
         <tr>
           <td><label bind="or_views_errorOn"></label></td>
@@ -21,7 +21,8 @@
     </div>
   </div>
   <div class="dialog-footer" bind="dialogFooter">
-    <button class="button" bind="okButton"></button>
+    <button class="button button-primary" bind="okButton"></button>
     <button class="button" bind="cancelButton"></button>
+  </div>
   </div>
 </div>

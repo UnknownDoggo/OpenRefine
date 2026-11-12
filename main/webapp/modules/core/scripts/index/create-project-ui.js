@@ -56,7 +56,7 @@ Refine.CreateProjectUI = function(elmt) {
   $('#create-project-progress-cancel-button').text($.i18n('core-buttons/cancel'));
   $('#create-project-error-ok-button').html($.i18n('core-buttons/ok'));
   
-  $.post(
+  $.get(
     "command/core/get-importing-configuration",
     null,
     function(data) {
@@ -68,16 +68,6 @@ Refine.CreateProjectUI = function(elmt) {
 };
 
 Refine.CreateProjectUI.controllers = [];
-
-Refine.CreateProjectUI.prototype.resize = function() {
-  var totalHeight = this._elmt.height();
-  var tabBodyContainer = $('#create-project-ui-source-selection-tab-bodies');
-  var selectedTabBody = $('.create-project-ui-source-selection-tab-body.selected');
-  
-  var top = tabBodyContainer.position().top;
-  var tabBodyHeight = totalHeight - top - DOM.getVPaddings(selectedTabBody);
-  $('.create-project-ui-source-selection-tab-body').css('height', tabBodyHeight + 'px');
-};
 
 Refine.CreateProjectUI.prototype._initializeUI = function() {
   for (var i = 0; i < Refine.CreateProjectUI.controllers.length; i++) {
@@ -96,11 +86,12 @@ Refine.CreateProjectUI.prototype.addSourceSelectionUI = function(sourceSelection
   .appendTo(bodyContainer)
   .hide();
 
-  sourceSelectionUI._divHeader = $('<div>')
+  sourceSelectionUI._divHeader = $('<a>')
   .addClass('create-project-ui-source-selection-tab')
   .text(sourceSelectionUI.label)
+  .attr('href', 'javascript:void(0);')
   .appendTo(headerContainer)
-  .click(function() { self.selectImportSource(sourceSelectionUI.id); });
+  .on('click',function() { self.selectImportSource(sourceSelectionUI.id); });
 
   sourceSelectionUI.ui.attachUI(sourceSelectionUI._divBody);
 
@@ -166,11 +157,22 @@ Refine.actionAreas.push({
   uiClass: Refine.CreateProjectUI
 });
 
+Refine.CreateProjectUI.prototype.setProgressKnown = function(known) {
+  if (known) {
+    $('#create-project-progress-spinner').hide();
+    $('#create-project-progress-bar-frame').show();
+  } else {
+    $('#create-project-progress-bar-frame').hide();
+    $('#create-project-progress-spinner').show();
+  }
+};
+
 Refine.CreateProjectUI.prototype.showImportProgressPanel = function(progressMessage, onCancel) {
   var self = this;
 
   this.showCustomPanel(this._progressPanel);
 
+  self.setProgressKnown(false);
   $('#create-project-progress-message').text(progressMessage);
   $('#create-project-progress-bar-body').css("width", "0%");
   $('#create-project-progress-message-left').text($.i18n('core-index-create/starting'));
@@ -178,7 +180,7 @@ Refine.CreateProjectUI.prototype.showImportProgressPanel = function(progressMess
   $('#create-project-progress-message-right').empty();
   $('#create-project-progress-timing').empty();
 
-  $('#create-project-progress-cancel-button').unbind().click(onCancel);
+  $('#create-project-progress-cancel-button').off().on('click',onCancel);
 };
 
 Refine.CreateProjectUI.prototype.pollImportJob = function(start, jobID, timerID, checkDone, callback, onError) {
@@ -203,6 +205,7 @@ Refine.CreateProjectUI.prototype.pollImportJob = function(start, jobID, timerID,
         
         onError(job);
       } else if (checkDone(job)) {
+        $('#create-project-progress-bar-body').removeClass('indefinite').css("width", "100%"); // show progress as done
         $('#create-project-progress-message').text($.i18n('core-index-create/done'));
 
         window.clearInterval(timerID);
@@ -215,6 +218,7 @@ Refine.CreateProjectUI.prototype.pollImportJob = function(start, jobID, timerID,
           var secondsSpent = (new Date().getTime() - start.getTime()) / 1000;
           var secondsRemaining = (100 / progress.percent) * secondsSpent - secondsSpent;
 
+          self.setProgressKnown(true);
           $('#create-project-progress-bar-body')
           .removeClass('indefinite')
           .css("width", progress.percent + "%");
@@ -231,6 +235,7 @@ Refine.CreateProjectUI.prototype.pollImportJob = function(start, jobID, timerID,
             $('#create-project-progress-timing').text($.i18n('core-index-create/almost-done'));
           }
         } else {
+          self.setProgressKnown(false);
           $('#create-project-progress-bar-body').addClass('indefinite');
           $('#create-project-progress-timing').empty();
         }
@@ -257,7 +262,7 @@ Refine.CreateProjectUI.prototype.showImportJobError = function(message, stack) {
   $('#create-project-error-stack').text(stack || $.i18n('core-index-create/no-details'));
 
   this.showCustomPanel(this._errorPanel);
-  $('#create-project-error-ok-button').unbind().click(function() {
+  $('#create-project-error-ok-button').off().on('click',function() {
     self.showSourceSelectionPanel();
   });
 };

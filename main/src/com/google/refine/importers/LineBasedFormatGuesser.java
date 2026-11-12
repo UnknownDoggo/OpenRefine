@@ -24,6 +24,7 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.importers;
 
 import java.io.File;
@@ -34,7 +35,7 @@ public class LineBasedFormatGuesser implements FormatGuesser {
 
     @Override
     public String guess(File file, String encoding, String seedFormat) {
-        SeparatorBasedImporter.Separator sep = SeparatorBasedImporter.guessSeparator(file, encoding);
+        SeparatorBasedImporter.Separator sep = SeparatorBasedImporter.guessSeparator(file, encoding, true);
         if (sep != null) {
             return "text/line-based/*sv";
         }

@@ -36,21 +36,20 @@ function ExpressionPreviewDialog(title, cellIndex, rowIndices, values, expressio
 
     var self = this;
     var frame = DialogSystem.createDialog();
-    frame.width("700px");
-    
+    frame.css("min-width", "700px")
     var header = $('<div></div>').addClass("dialog-header").text(title).appendTo(frame);
     var body = $('<div></div>').addClass("dialog-body").appendTo(frame);
     var footer = $('<div></div>').addClass("dialog-footer").appendTo(frame);
     var html = $(ExpressionPreviewDialog.generateWidgetHtml()).appendTo(body);
     
     this._elmts = DOM.bind(html);
-    
-    $('<button class="button"></button>').html($.i18n('core-buttons/ok')).click(function() {
+
+    $('<button class="button button-primary" bind="okButton"></button>').html($.i18n('core-buttons/ok')).on('click', function () {
         DialogSystem.dismissUntil(self._level - 1);
         self._onDone(self._previewWidget.getExpression(true));
     }).appendTo(footer);
-    
-    $('<button class="button"></button>').text($.i18n('core-buttons/cancel')).click(function() {
+
+    $('<button class="button"></button>').text($.i18n('core-buttons/cancel')).on('click',function() {
         DialogSystem.dismissUntil(self._level - 1);
     }).appendTo(footer);
     
@@ -83,7 +82,8 @@ ExpressionPreviewDialog.Widget = function(
     cellIndex,
     rowIndices,
     values,
-    expression
+    expression,
+    columnName
 ) {
     var language = "grel";
     if (!(expression)) {
@@ -113,36 +113,97 @@ ExpressionPreviewDialog.Widget = function(
     this._cellIndex = cellIndex;
     this._rowIndices = rowIndices;
     this._values = values;
-    
+    this._columnName = columnName;
+
     this._results = null;
     this._timerID = null;
     
     $("#expression-preview-tabs").tabs();
     
     this._elmts.expressionPreviewLanguageSelect[0].value = language;
-    this._elmts.expressionPreviewLanguageSelect.bind("change", function() {
+    this._elmts.expressionPreviewLanguageSelect.on("change", function() {
         Cookies.set("scripting.lang", this.value, {"SameSite" : "Lax"});
         self.update();
     });
         
     var self = this;
+    
+    this._expressionHistory = [];
+    this._currentHistoryIndex = -1; // -1 is current expression, 0 is most recent history, 1 is next history
+
     this._elmts.expressionPreviewTextarea
         .val(this.expression)
-        .bind("keyup change input",function(){
+        .on("keyup change input",function(){
+            self._expressionHistory[self._currentHistoryIndex] = self._getExpressionString();
             self._scheduleUpdate();
         })
-        .select()
-        .focus();
-        
-    this._tabContentWidth = this._elmts.expressionPreviewPreviewContainer.width() + "px";
-    
+        .trigger('select')
+        .trigger('focus');
+
+    this._elmts.expressionPreviewTextarea
+        .on("keydown", function(e) {
+            var setExpression = function(exp) {
+                var o = Scripting.parse(exp);
+                self._elmts.expressionPreviewTextarea[0].value = o.expression;
+                self._elmts.expressionPreviewLanguageSelect[0].value = o.language;
+                
+                self.update();
+            }
+
+            // handle up and down arrow keys
+            if (e.key === "ArrowUp") {
+                var isCaratAtBeginning = this.selectionStart == 0 && this.selectionEnd == 0;
+                var hasPreviousHistory = self._currentHistoryIndex < self._expressionHistory.length - 1;
+                if (isCaratAtBeginning && hasPreviousHistory) {
+                    // find the previous expression
+                    self._currentHistoryIndex++;
+                    setExpression(self._expressionHistory[self._currentHistoryIndex]);
+                    // move the carat to the beginning
+                    self._elmts.expressionPreviewTextarea[0].selectionStart = 0;
+                    self._elmts.expressionPreviewTextarea[0].selectionEnd = 0;
+                }
+            } else if (e.key === "ArrowDown") {
+                var isCaratAtEnd = this.selectionStart == this.value.length && this.selectionEnd == this.value.length;
+                var hasNextHistory = self._currentHistoryIndex >= 0;
+                // check whether the carat is at the end of the line
+                if (isCaratAtEnd && hasNextHistory) {
+                    // find the next expression
+                    self._currentHistoryIndex--;
+                    setExpression(self._expressionHistory[self._currentHistoryIndex]);
+                }
+            }
+        });
+
     this._elmts.or_dialog_expr.html($.i18n('core-dialogs/expression'));
     this._elmts.or_dialog_lang.html($.i18n('core-dialogs/language'));
     this._elmts.or_dialog_preview.html($.i18n('core-dialogs/preview'));
     this._elmts.or_dialog_history.html($.i18n('core-dialogs/history'));
     this._elmts.or_dialog_starred.html($.i18n('core-dialogs/starred'));
     this._elmts.or_dialog_help.html($.i18n('core-dialogs/help'));
-    
+
+    if(this._columnName != null){
+        this._elmts.or_dialog_preview.html($.i18n('core-dialogs/expression-preview'));
+        this._elmts.or_dialog_clusters.html($.i18n('core-dialogs/clusters-preview'));
+        this._elmts.or_dialog_clusters.closest('li').show();
+    }
+
+    var activeTabName = $("#clustering-functions-tabs").find(".ui-tabs-active a").text().split(' ')[0];
+    if(activeTabName === "Distance"){
+        $(".distance-clustering-parameters").show();
+
+        let radius = document.getElementById('radius');
+        radius.value = 1;
+        radius.addEventListener('input', function(){
+            self._scheduleUpdate();
+        });
+
+        let blockingChars = document.getElementById('blockingChars');
+        blockingChars.value = 6;
+        blockingChars.addEventListener('input', function(){
+            self._scheduleUpdate();
+        });
+    }
+
     this.update();
     this._renderExpressionHistoryTab();
     this._renderStarredExpressionsTab();
@@ -150,7 +211,7 @@ ExpressionPreviewDialog.Widget = function(
 };
 
 ExpressionPreviewDialog.Widget.prototype.getExpression = function(commit) {
-    var s = $.trim(this.expression || "");
+    var s = jQueryTrim(this.expression || "");
     if (!s.length) {
         return null;
     }
@@ -173,6 +234,14 @@ ExpressionPreviewDialog.Widget.prototype._getLanguage = function() {
     return this._elmts.expressionPreviewLanguageSelect[0].value;
 };
 
+ExpressionPreviewDialog.Widget.prototype._getCode = function() {
+    return jQueryTrim(this._elmts.expressionPreviewTextarea[0].value || "");
+};
+
+ExpressionPreviewDialog.Widget.prototype._getExpressionString = function() {
+    return this._getLanguage() + ":" + this._getCode();
+};
+
 ExpressionPreviewDialog.Widget.prototype._renderHelpTab = function() {
     var self = this;
     $.getJSON(
@@ -186,8 +255,12 @@ ExpressionPreviewDialog.Widget.prototype._renderHelpTab = function() {
 };
 
 ExpressionPreviewDialog.Widget.prototype._renderHelp = function(data) {
-    var elmt = this._elmts.expressionPreviewHelpTabBody.empty().width(this._tabContentWidth);
-    
+    var elmt = this._elmts.expressionPreviewHelpTabBody.empty();
+    $("<a />", {
+        href: "https://openrefine.org/docs/manual/grelfunctions",
+        text: $.i18n('core-dialogs/help/grelreference'),
+        target: "_blank",
+      }).appendTo(elmt);
     $('<h3></h3>').text("Variables").appendTo(elmt);
     var varTable = $('<table cellspacing="5"></table>').appendTo(elmt)[0];
     var vars = [
@@ -214,7 +287,7 @@ ExpressionPreviewDialog.Widget.prototype._renderHelp = function(data) {
         var variable = vars[i];
         var tr = varTable.insertRow(varTable.rows.length);
         $(tr.insertCell(0)).addClass("expression-preview-doc-item-title").text(variable.name);
-        $(tr.insertCell(1)).addClass("expression-preview-doc-item-desc").text(variable.description);
+        $(tr.insertCell(1)).addClass("expression-preview-doc-item-desc").html(variable.description);
     }
     
     var renderEntry = function(table, name, entry) {
@@ -229,7 +302,7 @@ ExpressionPreviewDialog.Widget.prototype._renderHelp = function(data) {
         $(tr1.insertCell(1)).addClass("expression-preview-doc-item-returns").text($.i18n('core-dialogs/returns')+": " + entry.returns);
         
         $(tr2.insertCell(0));
-        $(tr2.insertCell(1)).addClass("expression-preview-doc-item-desc").text(entry.description);
+        $(tr2.insertCell(1)).addClass("expression-preview-doc-item-desc").html(entry.description);
     };
     var renderEntries = function(table, map) {
         var names = [];
@@ -245,7 +318,7 @@ ExpressionPreviewDialog.Widget.prototype._renderHelp = function(data) {
             renderEntry(table, name, map[name]);
         }
     };
-    
+
     $('<h3></h3>').text("Functions").appendTo(elmt);
     var functionTable = $('<table width="100%" cellspacing="5"></table>').appendTo(elmt)[0];
     renderEntries(functionTable, data.functions);
@@ -262,6 +335,7 @@ ExpressionPreviewDialog.Widget.prototype._renderExpressionHistoryTab = function(
         null,
         function(data) {
             self._renderExpressionHistory(data);
+            self._expressionHistory = data.expressions.map(e => e.code);
         },
         "json"
     );
@@ -269,7 +343,7 @@ ExpressionPreviewDialog.Widget.prototype._renderExpressionHistoryTab = function(
 
 ExpressionPreviewDialog.Widget.prototype._renderExpressionHistory = function(data) {
     var self = this;
-    var elmt = this._elmts.expressionPreviewHistoryContainer.empty().width(this._tabContentWidth);
+    var elmt = this._elmts.expressionPreviewHistoryContainer.empty();
     
     var table = $(
         '<table>' +
@@ -283,7 +357,7 @@ ExpressionPreviewDialog.Widget.prototype._renderExpressionHistory = function(dat
         $('<a href="javascript:{}">&nbsp;</a>')
                 .addClass(entry.starred ? "data-table-star-on" : "data-table-star-off")
                 .appendTo(tr.insertCell(0))
-                .click(function() {
+                .on('click',function() {
                     Refine.postCSRF(
                         "command/core/toggle-starred-expression",
                         {
@@ -294,17 +368,17 @@ ExpressionPreviewDialog.Widget.prototype._renderExpressionHistory = function(dat
                             renderEntry(self,tr,entry);
                             self._renderStarredExpressionsTab();
                         },
-                        "json"
+                        ""
                     );
                 });
         
-        $('<a href="javascript:{}">'+$.i18n('core-dialogs/reuse')+'</a>').appendTo(tr.insertCell(1)).click(function() {
+        $('<a href="javascript:{}">'+$.i18n('core-dialogs/reuse')+'</a>').appendTo(tr.insertCell(1)).on('click',function() {
             self._elmts.expressionPreviewTextarea[0].value = o.expression;
             self._elmts.expressionPreviewLanguageSelect[0].value = o.language;
             
             $("#expression-preview-tabs").tabs();
             
-            self._elmts.expressionPreviewTextarea.select().focus();
+            self._elmts.expressionPreviewTextarea.trigger('select').trigger('focus');
             
             self.update();
         });
@@ -331,13 +405,13 @@ ExpressionPreviewDialog.Widget.prototype._renderStarredExpressionsTab = function
         function(data) {
             self._renderStarredExpressions(data);
         },
-        "json"
+        ""
     );
 };
 
 ExpressionPreviewDialog.Widget.prototype._renderStarredExpressions = function(data) {
     var self = this;
-    var elmt = this._elmts.expressionPreviewStarredContainer.empty().width(this._tabContentWidth);
+    var elmt = this._elmts.expressionPreviewStarredContainer.empty();
     
     var table = $(
         '<table>' +
@@ -349,25 +423,40 @@ ExpressionPreviewDialog.Widget.prototype._renderStarredExpressions = function(da
         var tr = table.insertRow(table.rows.length);
         var o = Scripting.parse(entry.code);
         
-        $('<a href="javascript:{}">'+$.i18n('core-dialogs/remove')+'</a>').appendTo(tr.insertCell(0)).click(function() {
-            Refine.postCSRF(
-                "command/core/toggle-starred-expression",
-                { expression: entry.code, returnList: true },
-                function(data) {
-                    self._renderStarredExpressions(data);
-                    self._renderExpressionHistoryTab();
-                },
-                "json"
-            );
+        $('<a href="javascript:{}">'+$.i18n('core-dialogs/remove')+'</a>').appendTo(tr.insertCell(0)).on('click',function() {
+            var removeExpression = DialogSystem.createDialog();
+                removeExpression.width("250px");
+            var removeExpressionHead = $('<div></div>').addClass("dialog-header").text($.i18n('core-dialogs/unstar-expression'))
+                .appendTo(removeExpression);
+            var removeExpressionFooter = $('<div></div>').addClass("dialog-footer").appendTo(removeExpression);
+
+            $('<button class="button button-primary" bind="okButton"></button>').html($.i18n('core-buttons/ok')).on('click',function() {
+                Refine.postCSRF(
+                    "command/core/toggle-starred-expression",
+                    { expression: entry.code, returnList: true },
+                    function(data) {
+                        self._renderStarredExpressions(data);
+                        self._renderExpressionHistoryTab();
+                    },
+                    "json"
+                );
+                DialogSystem.dismissUntil(DialogSystem._layers.length - 1);
+            }).appendTo(removeExpressionFooter);
+
+            $('<button class="button" style="float:right;"></button>').text($.i18n('core-buttons/cancel')).on('click',function() {
+                DialogSystem.dismissUntil(DialogSystem._layers.length - 1);
+            }).appendTo(removeExpressionFooter);
+
+            this._level = DialogSystem.showDialog(removeExpression);
         });
         
-        $('<a href="javascript:{}">Reuse</a>').appendTo(tr.insertCell(1)).click(function() {
+        $('<a href="javascript:{}">Reuse</a>').appendTo(tr.insertCell(1)).on('click',function() {
             self._elmts.expressionPreviewTextarea[0].value = o.expression;
             self._elmts.expressionPreviewLanguageSelect[0].value = o.language;
             
             $("#expression-preview-tabs").tabs();
             
-            self._elmts.expressionPreviewTextarea.select().focus();
+            self._elmts.expressionPreviewTextarea.trigger('select').trigger('focus');
             
             self.update();
         });
@@ -392,36 +481,79 @@ ExpressionPreviewDialog.Widget.prototype._scheduleUpdate = function() {
 
 ExpressionPreviewDialog.Widget.prototype.update = function() {
     var self = this;
-    var expression = this.expression = $.trim(this._elmts.expressionPreviewTextarea[0].value);
+    var expression = this.expression = jQueryTrim(this._elmts.expressionPreviewTextarea[0].value);
+    var activeTabName = $("#clustering-functions-tabs").find(".ui-tabs-active a").text().split(' ')[0];
     var params = {
         project: theProject.id,
         cellIndex: this._cellIndex
     };
     this._prepareUpdate(params);
     
-    $.post(
-        "command/core/preview-expression?" + $.param(params), 
-        {
-        	expression: this._getLanguage() + ":" + expression,
-            rowIndices: JSON.stringify(this._rowIndices) 
-        },
-        function(data) {
-            if (data.code != "error") {
-                self._results = data.results;
-            } else {
-                self._results = null;
-            }
-            self._renderPreview(expression, data);
-        },
-        "json"
-    );
+    if(activeTabName === "Distance"){
+        self._renderDistancePreview(this._values[0]);
+    } else {
+        Refine.postCSRF(
+            "command/core/preview-expression?" + $.param(params), 
+            {
+                expression: this._getLanguage() + ":" + expression,
+                rowIndices: JSON.stringify(this._rowIndices) 
+            },
+            function(data) {
+                if (data.code != "error") {
+                    self._results = data.results;
+                } else {
+                    self._results = null;
+                }
+                self._renderPreview(expression, data);
+            },
+            "json"
+        );
+    }
+
+    if(self._columnName != null){
+        self._elmts.expressionPreviewClustersContainer.html(
+            '<div style="margin: 1em; font-size: 130%; color: #888;">'+$.i18n('core-dialogs/clustering')+'<img src="images/small-spinner.gif"></div>'
+        );
+
+        self._params = {
+            "expression" : this._getLanguage() + ":" + expression,
+            "radius" : Number(document.getElementById('radius').value),
+            "blocking-ngram-size" : Number(document.getElementById('blockingChars').value)
+        };
+
+        Refine.postCSRF(
+            "command/core/compute-clusters?" + $.param({ project: theProject.id }),
+            {
+                engine: JSON.stringify(ui.browsingEngine.getJSON()),
+                clusterer: JSON.stringify({
+                    'type' : activeTabName === "Keying" ? "binning" : "knn",
+                    'function' : activeTabName === "Keying" ? "UserDefinedKeyer" : "UserDefinedDistance",
+                    'column' : self._columnName,
+                    'params' : self._params
+                })
+            },
+            function(data) {
+                var clusters = [];
+                if (data.code != "error") {
+                    $.each(data, function() {
+                        var cluster = {
+                            choices: this,
+                        };
+                        clusters.push(cluster);
+                    });
+                }
+                self._renderClusters(clusters);
+            },
+            "json"
+        );
+    }
 };
 
 ExpressionPreviewDialog.Widget.prototype._prepareUpdate = function(params) {
 };
 
 ExpressionPreviewDialog.Widget.prototype._renderPreview = function(expression, data) {
-    var container = this._elmts.expressionPreviewPreviewContainer.empty().width(this._tabContentWidth);
+    var container = this._elmts.expressionPreviewPreviewContainer.empty();
     
     var table = $('<table></table>').appendTo(
         $('<div>').addClass("expression-preview-table-wrapper").appendTo(container))[0];
@@ -464,5 +596,155 @@ ExpressionPreviewDialog.Widget.prototype._renderPreview = function(expression, d
             var v = this._results[i];
             renderValue(tdValue, v);
         }
+    }
+};
+
+ExpressionPreviewDialog.Widget.prototype._renderClusters = function(clusters) {
+    var container = this._elmts.expressionPreviewClustersContainer.empty();
+    
+    if (clusters.length > 0) {
+        var table = $('<table></table>')
+            .addClass("clustering-dialog-preview-table")
+            .appendTo($('<div>').addClass("clusters-preview-table-wrapper").appendTo(container))[0];
+
+        var trHead = table.insertRow(table.rows.length);
+        trHead.className = "header";
+        $(trHead.insertCell(0)).text("Number");
+        $(trHead.insertCell(1)).text("Clusters");
+        $(trHead.insertCell(2)).text(theProject.metadata.rowCount + " rows, " + clusters.length + (clusters.length === 1 ? " cluster" : " clusters"));
+
+        var entryTemplate = document.createElement('a');
+
+        var renderCluster = function(cluster, index) {
+            var tr = table.insertRow();
+            tr.className = index % 2 === 0 ? "odd" : "even"; // TODO: Unused?
+
+            var ul = document.createElement('ul');
+            ul.style.listStyleType = 'none';
+            var choices = cluster.choices;
+            for (let c = 0; c < choices.length; c++) {
+                let choice = choices[c];
+                var li = document.createElement('li');
+
+                var entry = entryTemplate.cloneNode();
+                entry.textContent = choice.v.toString().replaceAll(' ', '\xa0');
+                li.append(entry);
+
+                if (choice.c > 1) { 
+                  $('<span></span>').text($.i18n("core-dialogs/cluster-rows", choice.c)).addClass("clustering-dialog-preview-count").appendTo(li);
+                }
+                ul.append(li);
+            }
+
+            $('<span>' + (index+1) +'.</span>').appendTo(tr.insertCell(0));
+
+            $(tr.insertCell(1))
+                .append(ul);
+
+            tr.insertCell(2);
+
+            return choices.length;
+        };
+
+        var maxRenderRows = parseInt(
+            Refine.getPreference("ui.clustering.choices.limit", 5000)
+        );
+        maxRenderRows = isNaN(maxRenderRows) || maxRenderRows <= 0 ? 5000 : maxRenderRows;
+        var totalRows = 0;
+        for (var clusterIndex = 0; clusterIndex < clusters.length && totalRows < maxRenderRows; clusterIndex++) {
+            totalRows += renderCluster(clusters[clusterIndex], clusterIndex);
+        }
+    } else {
+        container.html(
+            '<div style="margin: 2em;"><div style="font-size: 130%; color: #333;">'+$.i18n('core-dialogs/no-cluster-found')+'</div><div style="padding-top: 1em; font-size: 110%; color: #888;">'+$.i18n('core-dialogs/try-another-method')+'</div></div>'
+        );
+    }
+};
+
+ExpressionPreviewDialog.Widget.prototype._renderDistancePreview = function(firstValue) {
+    var self = this;
+    var value1 = document.getElementById('value1') === null ? firstValue : document.getElementById('value1').value;
+    var value2 = document.getElementById('value2') === null ? firstValue : document.getElementById('value2').value;
+    var container = this._elmts.expressionPreviewPreviewContainer.empty();    
+    var expression = this.expression = jQueryTrim(this._elmts.expressionPreviewTextarea[0].value);
+    var params = {
+        project: theProject.id,
+        cellIndex: this._cellIndex
+    };
+
+    var table = $('<table></table>')
+        .addClass("clustering-dialog-preview-table")
+        .appendTo(container)[0];
+
+    var truncExpression = expression.length > 30 ? expression.substring(0, 30) + ' ...' : expression; 
+
+    var tr = table.insertRow(0);
+    $(tr.insertCell(0)).addClass("expression-preview-heading").text("value1");
+    $(tr.insertCell(1)).addClass("expression-preview-heading").text("value2");
+    $(tr.insertCell(2)).addClass("expression-preview-heading").text(truncExpression);
+    
+    tr = table.insertRow(1);
+
+    function addTextBox(value, id){
+        var ul = document.createElement('ul');
+        ul.style.listStyleType = 'none';
+        var li = document.createElement('li');
+    
+        var input = document.createElement('input');
+        input.value = value.toString().replaceAll(' ', '\xa0');
+        input.id = id;
+        input.addEventListener('input', renderExpressionResult);
+        li.append(input);
+        
+        ul.append(li);
+        return ul;
+    }
+
+    $(tr.insertCell(0)).append(addTextBox(value1, "value1"));
+    $(tr.insertCell(1)).append(addTextBox(value2, "value2"));
+    tr.insertCell(2);
+
+    renderExpressionResult();
+
+    function renderExpressionResult(){
+        value1 = document.getElementById('value1').value;
+        value2 = document.getElementById('value2').value;
+        let newExpression = expression.replace(/value1/g, '"' + value1.toString().replaceAll(' ', '\xa0') + '"')
+                                .replace(/value2/g, '"' + value2.toString().replaceAll(' ', '\xa0') + '"')
+                                .replace(/value/g,"");
+        Refine.postCSRF(
+            "command/core/preview-expression?" + $.param(params), 
+            {
+                expression: self._getLanguage() + ":" + newExpression,
+                rowIndices: JSON.stringify(self._rowIndices) 
+            },
+            function(data) {
+                let result;
+                if (data.code != "error") {
+                    result = data.results[0];
+                    self._elmts.expressionPreviewParsingStatus.empty().removeClass("error").text($.i18n('core-dialogs/no-syntax-err')+".");
+                } else {
+                    result = null;
+                    var message = (data.type == "parser") ? data.message : $.i18n('core-dialogs/internal-err');
+                    self._elmts.expressionPreviewParsingStatus.empty().addClass("error").text(message);
+                }
+                
+                tr.deleteCell(-1);
+
+                if (result !== null && result !== undefined) {
+                    if ($.isPlainObject(result)) {
+                        $('<span></span>').addClass("expression-preview-special-value").text($.i18n('core-dialogs/error')+": " + result.message).appendTo(tr.insertCell(2));
+                    } else if(isNaN(result)) {
+                        let message = $.i18n('core-dialogs/should-return-number');
+                        $('<span></span>').addClass("expression-preview-special-value").text($.i18n('core-dialogs/error')+": " + message).appendTo(tr.insertCell(2));
+                    } else {
+                        $('<span>' + result + '</span>').appendTo(tr.insertCell(2));
+                    }
+                } else {
+                    $('<span>' + result + '</span>').addClass("expression-preview-special-value").appendTo(tr.insertCell(2));
+                }
+            },
+            "json"
+        ); 
     }
 };

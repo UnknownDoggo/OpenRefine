@@ -41,29 +41,28 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.marc4j.MarcPermissiveStreamReader;
 import org.marc4j.MarcWriter;
 import org.marc4j.MarcXmlWriter;
 import org.marc4j.marc.Record;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.refine.importing.ImportingJob;
 import com.google.refine.importing.ImportingUtilities;
 import com.google.refine.util.JSONUtilities;
 
 public class MarcImporter extends XmlImporter {
-    
+
     public MarcImporter() {
         super();
     }
-    
+
     @Override
     public ObjectNode createParserUIInitializationData(ImportingJob job, List<ObjectNode> fileRecords, String format) {
         if (fileRecords.size() > 0) {
             ObjectNode firstFileRecord = fileRecords.get(0);
             File file = ImportingUtilities.getFile(job, firstFileRecord);
-            File tempFile = new File(file.getAbsolutePath()+".xml");
-
+            File tempFile = new File(file.getAbsolutePath() + ".xml");
 
             try {
                 InputStream inputStream = new FileInputStream(file);
@@ -82,13 +81,13 @@ public class MarcImporter extends XmlImporter {
                     try {
                         outputStream.close();
                         inputStream.close();
-                        
-                        if (tempFile.length() == 0)             // write failed. Most of time because of wrong Marc format
+
+                        if (tempFile.length() == 0) // write failed. Most of time because of wrong Marc format
                             tempFile.delete();
-                        else                    // only set json if write the temp file successfully:
-                            JSONUtilities.safePut(firstFileRecord, "location", 
-                                    JSONUtilities.getString(firstFileRecord, "location", "")+".xml");
-                        
+                        else // only set json if write the temp file successfully:
+                            JSONUtilities.safePut(firstFileRecord, "location",
+                                    JSONUtilities.getString(firstFileRecord, "location", "") + ".xml");
+
 //                        file.delete(); // get rid of our original file
                     } catch (IOException e) {
                         // Just ignore - not much we can do anyway
@@ -101,5 +100,5 @@ public class MarcImporter extends XmlImporter {
         ObjectNode options = super.createParserUIInitializationData(job, fileRecords, format);
         return options;
     };
-    
+
 }

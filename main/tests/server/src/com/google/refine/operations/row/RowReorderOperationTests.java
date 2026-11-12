@@ -24,11 +24,17 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.operations.row;
 
-import java.util.Properties;
+import static org.testng.Assert.assertEquals;
 
-import org.testng.Assert;
+import java.io.Serializable;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.BeforeSuite;
@@ -39,75 +45,167 @@ import com.google.refine.RefineTest;
 import com.google.refine.browsing.Engine.Mode;
 import com.google.refine.model.AbstractOperation;
 import com.google.refine.model.Cell;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
+import com.google.refine.operations.OperationDescription;
 import com.google.refine.operations.OperationRegistry;
-import com.google.refine.process.Process;
 import com.google.refine.sorting.SortingConfig;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
 public class RowReorderOperationTests extends RefineTest {
-    
+
     Project project = null;
+
+    String json = "  {\n" +
+            "    \"op\": \"core/row-reorder\",\n" +
+            "    \"description\": " + new TextNode(OperationDescription.row_reorder_brief()).toString() + ",\n" +
+            "    \"mode\": \"record-based\",\n" +
+            "    \"sorting\": {\n" +
+            "      \"criteria\": [\n" +
+            "        {\n" +
+            "          \"errorPosition\": 1,\n" +
+            "          \"valueType\": \"number\",\n" +
+            "          \"column\": \"start_year\",\n" +
+            "          \"blankPosition\": 2,\n" +
+            "          \"reverse\": false\n" +
+            "        }\n" +
+            "      ]\n" +
+            "    }\n" +
+            "  }";
 
     @BeforeSuite
     public void registerOperation() {
         OperationRegistry.registerOperation(getCoreModule(), "row-reorder", RowReorderOperation.class);
     }
-    
+
     @BeforeMethod
     public void setUp() {
-        project = createCSVProject(
-                "key,first\n"+
-                "8,b\n"+
-                ",d\n"+
-                "2,f\n"+
-                "1,h\n");
+        project = createProject(
+                new String[] { "key", "first" },
+                new Serializable[][] {
+                        { "8", "b" },
+                        { null, "d" },
+                        { "2", "f" },
+                        { "1", "h" },
+                        { "9", "F" },
+                        { "10", "f" }
+                });
     }
-    
+
     @AfterMethod
     public void tearDown() {
         ProjectManager.singleton.deleteProject(project.id);
     }
-    
+
+    @Test
+    public void testColumnDependencies() throws Exception {
+        String sortingJson = "{\"criteria\":[{\"column\":\"key\",\"valueType\":\"number\",\"reverse\":true,\"blankPosition\":-1,\"errorPosition\":1}]}";
+        SortingConfig sortingConfig = SortingConfig.reconstruct(sortingJson);
+        AbstractOperation op = new RowReorderOperation(
+                Mode.RowBased, sortingConfig);
+
+        assertEquals(op.getColumnDependencies(), Optional.of(Set.of()));
+        assertEquals(op.getColumnsDiff(), Optional.of(ColumnsDiff.empty()));
+    }
+
     @Test
     public void testSortEmptyString() throws Exception {
         String sortingJson = "{\"criteria\":[{\"column\":\"key\",\"valueType\":\"number\",\"reverse\":false,\"blankPosition\":2,\"errorPosition\":1}]}";
         SortingConfig sortingConfig = SortingConfig.reconstruct(sortingJson);
         project.rows.get(1).cells.set(0, new Cell("", null));
         AbstractOperation op = new RowReorderOperation(
-                Mode.RowBased, sortingConfig
-                );
-        Process process = op.createProcess(project, new Properties());
-        process.performImmediate();
-        
-        Assert.assertEquals("h", project.rows.get(0).cells.get(1).value);
-        Assert.assertEquals("f", project.rows.get(1).cells.get(1).value);
-        Assert.assertEquals("b", project.rows.get(2).cells.get(1).value);
-        Assert.assertEquals("d", project.rows.get(3).cells.get(1).value);
+                Mode.RowBased, sortingConfig);
+
+        runOperation(op, project);
+
+        Project expectedProject = createProject(
+                new String[] { "key", "first" },
+                new Serializable[][] {
+                        { "1", "h" },
+                        { "2", "f" },
+                        { "8", "b" },
+                        { "9", "F" },
+                        { "10", "f" },
+                        { "", "d" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
 
-   
+    @Test
+    public void testReverseSort() throws Exception {
+        String sortingJson = "{\"criteria\":[{\"column\":\"key\",\"valueType\":\"number\",\"reverse\":true,\"blankPosition\":-1,\"errorPosition\":1}]}";
+        SortingConfig sortingConfig = SortingConfig.reconstruct(sortingJson);
+        project.rows.get(1).cells.set(0, new Cell("", null));
+        AbstractOperation op = new RowReorderOperation(
+                Mode.RowBased, sortingConfig);
+
+        runOperation(op, project);
+
+        Project expectedProject = createProject(
+                new String[] { "key", "first" },
+                new Serializable[][] {
+                        { "", "d" },
+                        { "10", "f" },
+                        { "9", "F" },
+                        { "8", "b" },
+                        { "2", "f" },
+                        { "1", "h" },
+                });
+        assertProjectEquals(project, expectedProject);
+    }
+
+    @Test
+    public void testStringSort() throws Exception {
+        String sortingJson = "{\"criteria\":[{\"column\":\"first\",\"valueType\":\"string\",\"reverse\":false,\"blankPosition\":2,\"errorPosition\":1,\"caseSensitive\":true}]}";
+        SortingConfig sortingConfig = SortingConfig.reconstruct(sortingJson);
+        project.rows.get(1).cells.set(0, new Cell("", null));
+        AbstractOperation op = new RowReorderOperation(
+                Mode.RowBased, sortingConfig);
+
+        runOperation(op, project);
+
+        Project expected = createProject(
+                new String[] { "key", "first" },
+                new Serializable[][] {
+                        { "8", "b" },
+                        { "", "d" },
+                        { "2", "f" },
+                        { "10", "f" },
+                        { "9", "F" },
+                        { "1", "h" },
+                });
+        assertProjectEquals(project, expected);
+    }
+
     @Test
     public void serializeRowReorderOperation() throws Exception {
-        String json = "  {\n" + 
-                "    \"op\": \"core/row-reorder\",\n" + 
-                "    \"description\": \"Reorder rows\",\n" + 
-                "    \"mode\": \"record-based\",\n" + 
-                "    \"sorting\": {\n" + 
-                "      \"criteria\": [\n" + 
-                "        {\n" + 
-                "          \"errorPosition\": 1,\n" + 
-                "          \"valueType\": \"number\",\n" + 
-                "          \"column\": \"start_year\",\n" + 
-                "          \"blankPosition\": 2,\n" + 
-                "          \"reverse\": false\n" + 
-                "        }\n" + 
-                "      ]\n" + 
-                "    }\n" + 
-                "  }";
         TestUtils.isSerializedTo(ParsingUtilities.mapper.readValue(json, RowReorderOperation.class), json);
     }
 
-}
+    @Test
+    public void testRenameColumns() throws Exception {
+        RowReorderOperation SUT = ParsingUtilities.mapper.readValue(json, RowReorderOperation.class);
 
+        RowReorderOperation renamed = SUT.renameColumns(Map.of("start_year", "new_name"));
+
+        String json = "{\n" +
+                "    \"op\": \"core/row-reorder\",\n" +
+                "    \"description\": " + new TextNode(OperationDescription.row_reorder_brief()).toString() + ",\n" +
+                "    \"mode\": \"record-based\",\n" +
+                "    \"sorting\": {\n" +
+                "      \"criteria\": [\n" +
+                "        {\n" +
+                "          \"errorPosition\": 1,\n" +
+                "          \"valueType\": \"number\",\n" +
+                "          \"column\": \"new_name\",\n" +
+                "          \"blankPosition\": 2,\n" +
+                "          \"reverse\": false\n" +
+                "        }\n" +
+                "      ]\n" +
+                "    }\n" +
+                "  }";
+        TestUtils.isSerializedTo(renamed, json);
+    }
+
+}

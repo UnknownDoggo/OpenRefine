@@ -29,18 +29,21 @@
 
 package com.google.refine.extension.database.sqlite;
 
-import com.google.refine.extension.database.*;
-import com.google.refine.extension.database.model.DatabaseColumn;
-import com.google.refine.extension.database.model.DatabaseInfo;
-import com.google.refine.extension.database.model.DatabaseRow;
-import org.mockito.MockitoAnnotations;
-import org.testng.Assert;
-import org.testng.annotations.*;
-
-import java.io.File;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+
+import org.testng.Assert;
+import org.testng.annotations.BeforeTest;
+import org.testng.annotations.Test;
+
+import com.google.refine.extension.database.DBExtensionTests;
+import com.google.refine.extension.database.DatabaseConfiguration;
+import com.google.refine.extension.database.DatabaseService;
+import com.google.refine.extension.database.DatabaseServiceException;
+import com.google.refine.extension.database.model.DatabaseColumn;
+import com.google.refine.extension.database.model.DatabaseInfo;
+import com.google.refine.extension.database.model.DatabaseRow;
 
 @Test(groups = { "requiresSQLite" })
 public class SQLiteDatabaseServiceTest extends DBExtensionTests {
@@ -49,55 +52,66 @@ public class SQLiteDatabaseServiceTest extends DBExtensionTests {
     private String testTable;
 
     @BeforeTest
-    @Parameters({ "sqliteDbName", "sqliteTestTable" })
-    public void beforeTest(@Optional(DEFAULT_SQLITE_DB_NAME) String sqliteDbName,
-                    @Optional(DEFAULT_TEST_TABLE) String sqliteTestTable)
-                    throws DatabaseServiceException, SQLException {
-
-        MockitoAnnotations.initMocks(this);
-        testDbConfig = new DatabaseConfiguration();
-        testDbConfig.setDatabaseName(sqliteDbName);
-        testDbConfig.setDatabaseType(SQLiteDatabaseService.DB_NAME);
-
-        testTable = sqliteTestTable;
-        DBExtensionTestUtils.initTestData(testDbConfig, sqliteTestTable);
+    public void beforeTest() throws DatabaseServiceException, SQLException {
+        testDbConfig = getSQLiteDatabaseConfiguration();
+        testTable = getDatabaseTestTable("sqlite", DEFAULT_SQLITE_TEST_TABLE);
 
         DatabaseService.DBType.registerDatabase(SQLiteDatabaseService.DB_NAME, SQLiteDatabaseService.getInstance());
-    }
-
-    @AfterTest
-    @Parameters({ "sqliteDbName" })
-    public void afterTest(@Optional(DEFAULT_SQLITE_DB_NAME) String sqliteDbName) {
-        File f = new File(sqliteDbName);
-        if (f.exists()) {
-            f.delete();
-        }
     }
 
     @Test
     public void testGetDatabaseUrl() {
         SQLiteDatabaseService sqLiteDatabaseService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
         String dbUrl = sqLiteDatabaseService.getDatabaseUrl(testDbConfig);
 
         Assert.assertNotNull(dbUrl);
-        Assert.assertEquals(dbUrl, "jdbc:sqlite:extension_test_db.sqlite");
+        Assert.assertEquals(dbUrl, "jdbc:sqlite:tests/resources/test_db.sqlite?open_mode=1&limit_attached=0");
     }
 
     @Test
     public void testGetConnection() throws DatabaseServiceException {
 
         SQLiteDatabaseService sqLiteDatabaseService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
         Connection conn = sqLiteDatabaseService.getConnection(testDbConfig);
 
         Assert.assertNotNull(conn);
     }
 
+    /*
+     * We don't allow loading extensions because that executes arbitrary code
+     */
+    @Test(expectedExceptions = IllegalArgumentException.class)
+    public void testGetConnectionWithExtensions() throws DatabaseServiceException {
+        DatabaseConfiguration testDbConfigWithExtensions = new DatabaseConfiguration();
+        testDbConfigWithExtensions.setDatabaseName("test_db.sqlite?enable_load_extension=true");
+        testDbConfigWithExtensions.setDatabaseType(SQLiteDatabaseService.DB_NAME);
+
+        SQLiteDatabaseService sqLiteDatabaseService = (SQLiteDatabaseService) DatabaseService
+                .get(SQLiteDatabaseService.DB_NAME);
+        sqLiteDatabaseService.getConnection(testDbConfigWithExtensions);
+    }
+
+    /*
+     * We don't allow loading a remote SQLite file to make remote code execution harder
+     */
+    @Test(expectedExceptions = IllegalArgumentException.class)
+    public void testGetConnectionWithRemoteFile() throws DatabaseServiceException {
+        DatabaseConfiguration testDbConfigWithExtensions = new DatabaseConfiguration();
+        testDbConfigWithExtensions
+                .setDatabaseName("https://github.com/xerial/sqlite-jdbc/raw/master/src/test/resources/org/sqlite/sample.db");
+        testDbConfigWithExtensions.setDatabaseType(SQLiteDatabaseService.DB_NAME);
+
+        SQLiteDatabaseService sqLiteDatabaseService = (SQLiteDatabaseService) DatabaseService
+                .get(SQLiteDatabaseService.DB_NAME);
+        sqLiteDatabaseService.getConnection(testDbConfigWithExtensions);
+    }
+
     @Test
     public void testTestConnection() throws DatabaseServiceException {
         SQLiteDatabaseService sqLiteDatabaseService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
 
         boolean result = sqLiteDatabaseService.testConnection(testDbConfig);
         Assert.assertTrue(result);
@@ -107,7 +121,7 @@ public class SQLiteDatabaseServiceTest extends DBExtensionTests {
     public void testConnect() throws DatabaseServiceException {
 
         SQLiteDatabaseService sqLiteDatabaseService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
         DatabaseInfo databaseInfo = sqLiteDatabaseService.connect(testDbConfig);
         Assert.assertNotNull(databaseInfo);
     }
@@ -115,7 +129,7 @@ public class SQLiteDatabaseServiceTest extends DBExtensionTests {
     @Test
     public void testExecuteQuery() throws DatabaseServiceException {
         SQLiteDatabaseService sqLiteDatabaseService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
         DatabaseInfo databaseInfo = sqLiteDatabaseService.testQuery(testDbConfig, "SELECT * FROM " + testTable);
 
         Assert.assertNotNull(databaseInfo);
@@ -124,17 +138,17 @@ public class SQLiteDatabaseServiceTest extends DBExtensionTests {
     @Test
     public void testBuildLimitQuery() {
         SQLiteDatabaseService sqliteSqlService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
         String limitQuery = sqliteSqlService.buildLimitQuery(100, 0, "SELECT * FROM " + testTable);
         Assert.assertNotNull(limitQuery);
         Assert.assertEquals(limitQuery,
-                        "SELECT * FROM (SELECT * FROM " + testTable + ") data LIMIT " + 100 + " OFFSET " + 0 + ";");
+                "SELECT * FROM (SELECT * FROM " + testTable + ") data LIMIT " + 100 + " OFFSET " + 0 + ";");
     }
 
     @Test
     public void testGetRows() throws DatabaseServiceException {
         SQLiteDatabaseService sqliteSqlService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
         List<DatabaseRow> dbRows = sqliteSqlService.getRows(testDbConfig, "SELECT * FROM " + testTable);
 
         Assert.assertNotNull(dbRows);
@@ -151,7 +165,7 @@ public class SQLiteDatabaseServiceTest extends DBExtensionTests {
         List<DatabaseColumn> dbColumns;
 
         SQLiteDatabaseService sqliteSqlService = (SQLiteDatabaseService) DatabaseService
-                        .get(SQLiteDatabaseService.DB_NAME);
+                .get(SQLiteDatabaseService.DB_NAME);
 
         dbColumns = sqliteSqlService.getColumns(testDbConfig, "SELECT * FROM " + testTable);
 

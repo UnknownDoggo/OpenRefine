@@ -24,24 +24,39 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.browsing.facets;
 
-import java.io.IOException;
+import static org.testng.Assert.assertEquals;
 
-import org.testng.annotations.Test;
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+
 import com.google.refine.RefineTest;
 import com.google.refine.browsing.Engine;
-import com.google.refine.browsing.facets.Facet;
 import com.google.refine.browsing.facets.ListFacet.ListFacetConfig;
+import com.google.refine.expr.MetaParser;
+import com.google.refine.grel.Parser;
 import com.google.refine.model.Project;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
 public class ListFacetTests extends RefineTest {
-    
+
     private static String jsonConfig = "{"
             + "\"type\":\"list\","
             + "\"name\":\"facet A\","
@@ -54,80 +69,166 @@ public class ListFacetTests extends RefineTest {
             + "\"selectError\":false,"
             + "\"invert\":false"
             + "}";
-    
+
+    private static String jsonConfigParseError = "{"
+            + "\"type\":\"list\","
+            + "\"name\":\"facet A\","
+            + "\"columnName\":\"Column A\","
+            + "\"expression\":\"foo(\","
+            + "\"omitBlank\":false,"
+            + "\"omitError\":false,"
+            + "\"selection\":[{\"v\":{\"v\":\"foobar\",\"l\":\"true\"}}],"
+            + "\"selectBlank\":false,"
+            + "\"selectError\":false,"
+            + "\"invert\":false"
+            + "}";
+
+    private static String jsonConfigRenamed = "{"
+            + "\"type\":\"list\","
+            + "\"name\":\"facet A\","
+            + "\"columnName\":\"Column A2\","
+            + "\"expression\":\"grel:value + \\\"bar\\\"\","
+            + "\"omitBlank\":false,"
+            + "\"omitError\":false,"
+            + "\"selection\":[{\"v\":{\"v\":\"foobar\",\"l\":\"true\"}}],"
+            + "\"selectBlank\":false,"
+            + "\"selectError\":false,"
+            + "\"invert\":false"
+            + "}";
+
     private static String jsonFacetError = "{"
             + "\"name\":\"facet A\","
             + "\"expression\":\"value+\\\"bar\\\"\","
             + "\"columnName\":\"Column A\","
             + "\"invert\":false,"
-            + "\"error\":\"No column named Column A\"" + 
+            + "\"error\":\"No column named Column A\"" +
             "}";
-    
+
     private static String jsonFacet = "{"
             + "\"name\":\"facet A\","
             + "\"expression\":\"value+\\\"bar\\\"\","
             + "\"columnName\":\"Column A\","
             + "\"invert\":false,"
             + "\"choices\":["
-            + "     {\"v\":{\"v\":\"foobar\",\"l\":\"foobar\"},\"c\":1,\"s\":true},"
-            + "     {\"v\":{\"v\":\"barbar\",\"l\":\"barbar\"},\"c\":1,\"s\":false}"
+            + "     {\"v\":{\"v\":\"barbar\",\"l\":\"barbar\"},\"c\":1,\"s\":false},"
+            + "     {\"v\":{\"v\":\"foobar\",\"l\":\"foobar\"},\"c\":1,\"s\":true}"
             + "]}";
-    
+
     private static String selectedEmptyChoiceFacet = "{"
-    		+ "\"name\":\"facet A\","
-    		+ "\"expression\":\"value+\\\"bar\\\"\","
-    		+ "\"columnName\":\"Column A\","
-    		+ "\"invert\":false,"
-    		+ "\"choices\":["
-    		+ "    {\"v\":{\"v\":\"ebar\",\"l\":\"ebar\"},\"c\":1,\"s\":false},"
-    		+ "    {\"v\":{\"v\":\"cbar\",\"l\":\"cbar\"},\"c\":1,\"s\":false},"
-    		+ "    {\"v\":{\"v\":\"abar\",\"l\":\"abar\"},\"c\":1,\"s\":false},"
-    		+ "    {\"v\":{\"v\":\"foobar\",\"l\":\"true\"},\"c\":0,\"s\":true}"
-    		+ "]}";
+            + "\"name\":\"facet A\","
+            + "\"expression\":\"value+\\\"bar\\\"\","
+            + "\"columnName\":\"Column A\","
+            + "\"invert\":false,"
+            + "\"choices\":["
+            + "    {\"v\":{\"v\":\"abar\",\"l\":\"abar\"},\"c\":1,\"s\":false},"
+            + "    {\"v\":{\"v\":\"cbar\",\"l\":\"cbar\"},\"c\":1,\"s\":false},"
+            + "    {\"v\":{\"v\":\"ebar\",\"l\":\"ebar\"},\"c\":1,\"s\":false},"
+            + "    {\"v\":{\"v\":\"foobar\",\"l\":\"true\"},\"c\":0,\"s\":true}"
+            + "]}";
+
+    @BeforeMethod
+    public void registerGRELParser() {
+        MetaParser.registerLanguageParser("grel", "GREL", Parser.grelParser, "value");
+    }
+
+    @AfterMethod
+    public void unregisterGRELParser() {
+        MetaParser.unregisterLanguageParser("grel");
+    }
 
     @Test
     public void serializeListFacetConfig() throws JsonParseException, JsonMappingException, IOException {
         ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
         TestUtils.isSerializedTo(facetConfig, jsonConfig);
     }
-    
+
+    @Test
+    public void testColumnDependencies() throws Exception {
+        ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
+        assertEquals(facetConfig.getColumnDependencies(), Optional.of(Collections.singleton("Column A")));
+    }
+
+    @Test
+    public void testColumnDependenciesWithError() throws Exception {
+        ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfigParseError, ListFacetConfig.class);
+        assertEquals(facetConfig.getColumnDependencies(), Optional.of(Collections.emptySet()));
+    }
+
+    @Test
+    public void testRenameColumns() throws Exception {
+        ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
+        FacetConfig renamed = facetConfig.renameColumnDependencies(Map.of("Column A", "Column A2"));
+        TestUtils.isSerializedTo(renamed, jsonConfigRenamed);
+    }
+
+    @Test
+    public void testRenameColumnsWithParseError() throws Exception {
+        ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfigParseError, ListFacetConfig.class);
+        FacetConfig renamed = facetConfig.renameColumnDependencies(Map.of("foo", "bar"));
+        TestUtils.isSerializedTo(renamed, jsonConfigParseError);
+    }
+
     @Test
     public void serializeListFacet() throws JsonParseException, JsonMappingException, IOException {
-        Project project = createCSVProject("Column A\n" +
-                "foo\n" +
-                "bar\n");
+        Project project = createProject(
+                new String[] { "Column A" },
+                new Serializable[][] {
+                        { "foo" },
+                        { "bar" }
+                });
         Engine engine = new Engine(project);
-        
+
         ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
-        
+
         Facet facet = facetConfig.apply(project);
         facet.computeChoices(project, engine.getAllFilteredRows());
-        
-        TestUtils.isSerializedTo(facet, jsonFacet);
+
+        ObjectNode actual = ParsingUtilities.mapper.valueToTree(facet);
+        List<JsonNode> choicesList = new ArrayList<>();
+
+        actual.findValues("choices").get(0).forEach(choicesList::add);
+        choicesList.sort(Comparator.comparing(JsonNode::toString));
+        actual.replace("choices", ParsingUtilities.mapper.createArrayNode().addAll(choicesList));
+
+        TestUtils.assertEqualsAsJson(actual.toString(), jsonFacet);
     }
-    
+
     @Test
     public void serializeListFacetWithError() throws JsonParseException, JsonMappingException, IOException {
-        Project project = createCSVProject("other column\n" +
-                "foo\n" +
-                "bar\n");
-       
+        Project project = createProject(
+                new String[] { "other column" },
+                new Serializable[][] {
+                        { "foo" },
+                        { "bar" }
+                });
+
         ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
         Facet facet = facetConfig.apply(project);
         TestUtils.isSerializedTo(facet, jsonFacetError);
     }
-    
+
     @Test
     public void testSelectedEmptyChoice() throws IOException {
-    	Project project = createCSVProject("Column A\n" + 
-    			"a\n" + 
-    			"c\n" + 
-    			"e");
-    	Engine engine = new Engine(project);
-    	
-    	ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
-    	Facet facet = facetConfig.apply(project);
-    	facet.computeChoices(project, engine.getAllFilteredRows());
-    	TestUtils.isSerializedTo(facet, selectedEmptyChoiceFacet);
+        Project project = createProject(
+                new String[] { "Column A" },
+                new Serializable[][] {
+                        { "a" },
+                        { "c" },
+                        { "e" },
+                });
+        Engine engine = new Engine(project);
+
+        ListFacetConfig facetConfig = ParsingUtilities.mapper.readValue(jsonConfig, ListFacetConfig.class);
+        Facet facet = facetConfig.apply(project);
+        facet.computeChoices(project, engine.getAllFilteredRows());
+
+        ObjectNode actual = ParsingUtilities.mapper.valueToTree(facet);
+        List<JsonNode> choicesList = new ArrayList<>();
+
+        actual.findValues("choices").get(0).forEach(choicesList::add);
+        choicesList.sort(Comparator.comparing(n -> n.get("v").toString()));
+        actual.replace("choices", ParsingUtilities.mapper.createArrayNode().addAll(choicesList));
+
+        TestUtils.assertEqualsAsJson(actual.toString(), selectedEmptyChoiceFacet);
     }
 }

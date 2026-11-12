@@ -66,12 +66,18 @@ HistoryPanel.prototype.update = function(onDone) {
   );
 };
 
+// returns the changes "in the future", i.e. changes that have been undone
+// and will be erased by any new operation applied in this state
+HistoryPanel.prototype.undoneChanges = function() {
+  var self = this;
+  return self._data.future;
+}
+
 HistoryPanel.prototype._render = function() {
   var self = this;
-
   this._tabHeader.html($.i18n('core-project/undo-redo')+' <span class="count">' + this._data.past.length + ' / ' + ( this._data.future.length + this._data.past.length ) + '</span>');
 
-  this._div.empty().unbind().html(DOM.loadHTML("core", "scripts/project/history-panel.html"));
+  this._div.empty().off().html(DOM.loadHTML("core", "scripts/project/history-panel.html"));
 
   var elmts = DOM.bind(this._div);
   
@@ -87,27 +93,22 @@ HistoryPanel.prototype._render = function() {
     var a = $(DOM.loadHTML("core", "scripts/project/history-entry.html")).appendTo(container);
     if (lastDoneID >= 0) {
       a.attr("href", "javascript:{}")
-      .click(function(evt) {
+      .on('click',function(evt) {
         return self._onClickHistoryEntry(evt, entry, lastDoneID);
-      })
-      .mouseover(function() {
-        if (past) {
-          elmts.pastHighlightDiv.show().height(elmts.pastDiv.height() - this.offsetTop - this.offsetHeight);
-        } else {
-          elmts.futureHighlightDiv.show().height(this.offsetTop + this.offsetHeight);
-        }
-      })
-      .mouseout(function() {
-        if (past) {
-          elmts.pastHighlightDiv.hide();
-        } else {
-          elmts.futureHighlightDiv.hide();
-        }
       });
     }
 
-    a[0].childNodes[0].appendChild(document.createTextNode(index + "."));
-    a[0].childNodes[1].appendChild(document.createTextNode(entry.description));
+    var fields = DOM.bind(a);
+    fields.entryIndex.text(index + ".");
+    fields.entryDescription.text(entry.description);
+    if (entry.operation_id != null) {
+      let icon = OperationIconRegistry.getIcon(entry.operation_id);
+      if (icon != null) {
+        $('<img />')
+          .attr('src', icon)
+          .appendTo(fields.operationIcon);
+      }
+    }
 
     return a;
   };
@@ -139,8 +140,8 @@ HistoryPanel.prototype._render = function() {
 
     elmts.helpDiv.hide();
 
-    elmts.filterInput.bind("keyup change input",function() {
-      var filter = $.trim(this.value.toLowerCase());
+    elmts.filterInput.on("keyup change input",function() {
+      var filter = jQueryTrim(this.value.toLowerCase());
       if (filter.length === 0) {
         elmts.bodyDiv.find(".history-entry").removeClass("filtered-out");
       } else {
@@ -159,8 +160,8 @@ HistoryPanel.prototype._render = function() {
     elmts.bodyControlsDiv.hide();
   }
 
-  elmts.extractLink.click(function() { self._extractOperations(); });
-  elmts.applyLink.click(function() { self._showApplyOperationsDialog(); });
+  elmts.extractLink.on('click',function() { self._extractOperations(); });
+  elmts.applyLink.on('click',function() { self._showApplyOperationsDialog(); });
 
   this.resize();
 };
@@ -172,7 +173,7 @@ HistoryPanel.prototype._onClickHistoryEntry = function(evt, entry, lastDoneID) {
       "undo-redo",
       { lastDoneID: lastDoneID },
       null,
-      { everythingChanged: true }
+      { everythingChanged: true, warnAgainstHistoryErasure: false }
   );
 };
 
@@ -191,133 +192,10 @@ HistoryPanel.prototype._extractOperations = function() {
 };
 
 HistoryPanel.prototype._showExtractOperationsDialog = function(json) {
-  var self = this;
-  var frame = $(DOM.loadHTML("core", "scripts/project/history-extract-dialog.html"));
-  var elmts = DOM.bind(frame);
-
-  elmts.dialogHeader.html($.i18n('core-project/extract-history'));
-  elmts.or_proj_extractSave.html($.i18n('core-project/extract-save'));
-  elmts.selectAllButton.html($.i18n('core-buttons/select-all'));
-  elmts.unselectAllButton.html($.i18n('core-buttons/unselect-all'));
-  elmts.closeButton.html($.i18n('core-buttons/close'));
-
-  var entryTable = elmts.entryTable[0];
-  var createEntry = function(entry) {
-    var tr = entryTable.insertRow(entryTable.rows.length);
-    var td0 = tr.insertCell(0);
-    var td1 = tr.insertCell(1);
-    td0.width = "1%";
-
-    if ("operation" in entry) {
-      entry.selected = true;
-
-      $('<input type="checkbox" checked="true" />').appendTo(td0).click(function() {
-        entry.selected = !entry.selected;
-        updateJson();
-      });
-
-      $('<span>').text(entry.operation.description).appendTo(td1);
-    } else {
-      $('<span>').text(entry.description).css("color", "#888").appendTo(td1);
-    }
-  };
-  for (var i = 0; i < json.entries.length; i++) {
-    createEntry(json.entries[i]);
-  }
-
-  var updateJson = function() {
-    var a = [];
-    for (var i = 0; i < json.entries.length; i++) {
-      var entry = json.entries[i];
-      if ("operation" in entry && entry.selected) {
-        a.push(entry.operation);
-      }
-    }
-    elmts.textarea.text(JSON.stringify(a, null, 2));
-  };
-  updateJson();
-
-  elmts.closeButton.click(function() { DialogSystem.dismissUntil(level - 1); });
-  elmts.selectAllButton.click(function() {
-    for (var i = 0; i < json.entries.length; i++) {
-      json.entries[i].selected = true;
-    }
-
-    frame.find('input[type="checkbox"]').prop('checked', true);
-    updateJson();
-  });
-  elmts.unselectAllButton.click(function() {
-    for (var i = 0; i < json.entries.length; i++) {
-      json.entries[i].selected = false;
-    }
-
-    frame.find('input[type="checkbox"]').prop('checked', false);
-    updateJson();
-  });
-
-  var level = DialogSystem.showDialog(frame);
-
-  elmts.textarea[0].select();
+  new ExtractOperationsDialog(json);
 };
 
 HistoryPanel.prototype._showApplyOperationsDialog = function() {
-  var self = this;
-  var frame = $(DOM.loadHTML("core", "scripts/project/history-apply-dialog.html"));
-  var elmts = DOM.bind(frame);
-  
-  elmts.dialogHeader.html($.i18n('core-project/apply-operation'));
-  elmts.or_proj_pasteJson.html($.i18n('core-project/paste-json'));
-  
-  elmts.applyButton.html($.i18n('core-buttons/perform-op'));
-  elmts.cancelButton.html($.i18n('core-buttons/cancel'));
-
-  var fixJson = function(json) {
-    json = json.trim();
-    if (!json.startsWith("[")) {
-      json = "[" + json;
-    }
-    if (!json.endsWith("]")) {
-      json = json + "]";
-    }
-
-    return json.replace(/\}\s*\,\s*\]/g, "} ]").replace(/\}\s*\{/g, "}, {");
-  };
-
-  elmts.applyButton.click(function() {
-    var json;
-
-    try {
-      json = elmts.textarea[0].value;
-      json = fixJson(json);
-      json = JSON.parse(json);
-    } catch (e) {
-      alert($.i18n('core-project/json-invalid')+".");
-      return;
-    }
-
-    Refine.postCoreProcess(
-        "apply-operations",
-        {},
-        { operations: JSON.stringify(json) },
-        { everythingChanged: true },
-        {
-          onDone: function(o) {
-            if (o.code == "pending") {
-              // Something might have already been done and so it's good to update
-              Refine.update({ everythingChanged: true });
-            }
-          }
-        }
-    );
-
-    DialogSystem.dismissUntil(level - 1);
-  });
-
-  elmts.cancelButton.click(function() {
-    DialogSystem.dismissUntil(level - 1);
-  });
-
-  var level = DialogSystem.showDialog(frame);
-
-  elmts.textarea.focus();
+  new ApplyOperationsDialog();
 };
+

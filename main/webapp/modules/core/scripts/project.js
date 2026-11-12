@@ -23,8 +23,8 @@ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
 A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
 OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
 SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,           
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY           
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
@@ -35,26 +35,28 @@ var theProject;
 var thePreferences;
 var ui = {};
 
-var lang = (navigator.language|| navigator.userLanguage).split("-")[0];
-var dictionary = "";
-$.ajax({
-	url : "command/core/load-language?",
-	type : "POST",
-	async : false,
-	data : {
-	  module : "core",
-//		lang : lang
-	},
-	success : function(data) {
-		dictionary = data['dictionary'];
-        lang = data['lang'];
-	}
-});
-$.i18n().load(dictionary, lang);
-$.i18n({ locale: lang });
-// End internationalization
-
 var Refine = {};
+
+I18NUtil.init("core");
+
+/**
+ * Requests a CSRF token and calls the supplied callback.
+ * @public
+ * @param {function(string)} onCSRF - The callback to call with the token.
+ */
+Refine.wrapCSRF = CSRFUtil.wrapCSRF;
+
+/**
+ * Performs a POST request where an additional CSRF token is automatically attached.
+ * @public
+ * @param {string} url - The URL to send the request to.
+ * @param {Object|string} data - The data to send with the request.
+ * @param {function(object)} success - The callback to call on success.
+ * @param {string} dataType - The type of data expected in the response.
+ * @param {function(object)} failCallback - The callback to call on failure.
+ * @returns {jQuery.jqXHR} The jQuery AJAX request object.
+ */
+Refine.postCSRF = CSRFUtil.postCSRF;
 
 Refine.reportException = function(e) {
   if (window.console) {
@@ -63,11 +65,15 @@ Refine.reportException = function(e) {
 };
 
 function resize() {
-  var leftPanelWidth = 300;
+  var leftPanelWidth = JSON.parse(Refine.getPreference("ui.browsing.facetsHistoryPanelWidth", 300));
+  if(typeof leftPanelWidth != "number" || leftPanelWidth < 200 || leftPanelWidth > 500) {
+    leftPanelWidth = 300;
+  }
+
   var width = $(window).width();
   var top = $("#header").outerHeight();
   var height = $(window).height() - top;
-  
+
   if (ui.leftPanelDiv.css('display') == "none") { leftPanelWidth = 0; }
 
   var leftPanelPaddings = ui.leftPanelDiv.outerHeight(true) - ui.leftPanelDiv.height();
@@ -120,10 +126,8 @@ function resizeAll() {
 function initializeUI(uiState) {
   $("#loading-message").hide();
   $("#notification-container").hide();
-  $("#project-title").show();
-  $("#project-controls").show();
   $("#body").show();
-  
+
   $("#or-proj-open").text($.i18n('core-project/open')+"...");
   $("#project-permalink-button").text($.i18n('core-project/permalink'));
   $("#project-name-button").attr("title",$.i18n('core-project/proj-name'));
@@ -132,12 +136,14 @@ function initializeUI(uiState) {
   $("#or-proj-starting").text($.i18n('core-project/starting')+"...");
   $("#or-proj-facFil").text($.i18n('core-project/facet-filter'));
   $("#or-proj-undoRedo").text($.i18n('core-project/undo-redo'));
-  $("#or-proj-ext").text($.i18n('core-project/extensions')+":");
+  $("#or-proj-ext").text($.i18n('core-project/extensions'));
 
-  $('#project-name-button').click(Refine._renameProject);
-  $('#project-permalink-button').mouseenter(function() {
+  $('#project-name-button').on('click',Refine._renameProject);
+  $('#project-permalink-button').on('focus',function() {
     this.href = Refine.getPermanentLink();
   });
+
+  $('#app-home-button').attr('title', $.i18n('core-index/navigate-home'));
 
   Refine.setTitle();
 
@@ -150,27 +156,29 @@ function initializeUI(uiState) {
   resize();
   resizeTabs();
 
-  $('<a>').attr("id", "hide-left-panel-button")
+  $('<button>').attr("id", "hide-left-panel-button")
     .addClass("visibility-panel-button")
-    .click(function() { Refine._showHideLeftPanel(); })
+    .attr("aria-label", $.i18n('core-index/hide-panel'))
+    .on('click',function() { Refine._showHideLeftPanel(); })
     .prependTo(ui.leftPanelTabs);
 
-  $('<a>').attr("id", "show-left-panel-button")
+  $('<button>').attr("id", "show-left-panel-button")
     .addClass("visibility-panel-button")
-    .click(function() { Refine._showHideLeftPanel(); })
+    .attr("aria-label", $.i18n('core-index/show-panel'))
+    .on('click',function() { Refine._showHideLeftPanel(); })
     .prependTo(ui.toolPanelDiv);
-  
+
   ui.summaryBar = new SummaryBar(ui.summaryBarDiv);
   ui.browsingEngine = new BrowsingEngine(ui.facetPanelDiv, uiState.facets || []);
   ui.processPanel = new ProcessPanel(ui.processPanelDiv);
   ui.historyPanel = new HistoryPanel(ui.historyPanelDiv, ui.historyTabHeader);
   ui.dataTableView = new DataTableView(ui.viewPanelDiv);
 
-  ui.leftPanelTabs.bind('tabsactivate', function(event, tabs) {
-    tabs.newPanel.resize();
+  ui.leftPanelTabs.on('tabsactivate', function(event, tabs) {
+    tabs.newPanel.trigger('resize');
   });
 
-  $(window).bind("resize", resizeAll);
+  $(window).on("resize", resizeAll);
 
   if (uiState.facets) {
     Refine.update({ engineChanged: true });
@@ -179,6 +187,12 @@ function initializeUI(uiState) {
 
 Refine._showHideLeftPanel = function() {
   $('div#body').toggleClass("hide-left-panel");
+  resizeAll();
+};
+
+Refine.showLeftPanel = function() {
+  $('div#body').removeClass("hide-left-panel");
+  if(ui.browsingEngine == undefined || ui.browsingEngine.resize == undefined) return;
   resizeAll();
 };
 
@@ -193,64 +207,54 @@ Refine.setTitle = function(status) {
 };
 
 Refine.reinitializeProjectData = function(f, fError) {
-  $.getJSON(
-    "command/core/get-project-metadata?" + $.param({ project: theProject.id }), null,
-    function(data) {
-      if (data.status == "error") {
-        alert(data.message);
-        if (fError) {
-          fError();
-        }
-      } else {
-        theProject.metadata = data;
-        $.getJSON(
-          "command/core/get-models?" + $.param({ project: theProject.id }), null,
-          function(data) {
-            if (data.status == "error") {
-              alert(data.message);
-              if (fError) {
-                fError();
-              }
-            } else {
-              for (var n in data) {
-                if (data.hasOwnProperty(n)) {
-                  theProject[n] = data[n];
-                }
-              }
-              $.post(
-                "command/core/get-all-preferences", null,
-                function(preferences) {
-                  if (preferences.status == "error") {
-                    alert(preferences.message);
-                    if (fError) {
-                      fError();
-                    }
-                  } else {
-                    if (preferences != null) {
-                      thePreferences = preferences;
-                    }
-                    f();
-                  }
-                },
-                'json'
-              );
-            }
-          },
-          'json'
-        );
+  function handleError(status, message, fError) {
+    if (status === "error") {
+      alert(message);
+      if (fError) {
+        fError();
       }
-    },
-    'json'
-  );
+      return true;
+    }
+    return false;
+  }
+
+  $.when(
+    $.getJSON("command/core/get-project-metadata?" + $.param({ project: theProject.id }), null),
+    $.getJSON("command/core/get-models?" + $.param({ project: theProject.id }), null),
+    $.getJSON("command/core/get-all-preferences", null),
+  ).done(function(metadata, models, preferences) {
+    metadata = metadata[0], models = models[0], preferences = preferences[0];
+    if (
+      handleError(metadata.status, metadata.message, fError) ||
+      handleError(models.status, models.message, fError) ||
+      handleError(preferences.status, preferences.message, fError)
+    ) {
+      return;
+    }
+
+    theProject.metadata = metadata;
+
+    for (var n in models) {
+      if (models.hasOwnProperty(n)) {
+        theProject[n] = models[n];
+      }
+    }
+
+    if (preferences) {
+      thePreferences = preferences;
+    }
+
+    f();
+  });
 };
 
-Refine.getPreference = function(key, defaultValue) { 
+Refine.getPreference = function(key, defaultValue) {
   if(!thePreferences.hasOwnProperty(key)) { return defaultValue; }
 
   return thePreferences[key];
 }
 
-Refine.setPreference = function(key, newValue) { 
+Refine.setPreference = function(key, newValue) {
   thePreferences[key] = newValue;
 
   Refine.wrapCSRF(function(token) {
@@ -259,7 +263,7 @@ Refine.setPreference = function(key, newValue) {
       type: "POST",
       url: "command/core/set-preference?" + $.param({ name: key }),
       data: {
-        "value" : JSON.stringify(newValue), 
+        "value" : JSON.stringify(newValue),
         csrf_token: token
       },
       success: function(data) { },
@@ -274,7 +278,7 @@ Refine._renameProject = function() {
     return;
   }
 
-  name = $.trim(name);
+  name = jQueryTrim(name);
   if (theProject.metadata.name == name || name.length === 0) {
     return;
   }
@@ -316,8 +320,9 @@ Refine.createUpdateFunction = function(options, onFinallyDone) {
     pushFunction(Refine.reinitializeProjectData);
   }
   if (options.everythingChanged || options.modelsChanged || options.rowsChanged || options.rowMetadataChanged || options.cellsChanged || options.engineChanged) {
+    var preservePage = options.rowIdsPreserved && (options.recordIdsPreserved || ui.browsingEngine.getMode() === "row-based");
     pushFunction(function(onDone) {
-      ui.dataTableView.update(onDone);
+      ui.dataTableView.update(onDone, preservePage);
     });
     pushFunction(function(onDone) {
       ui.browsingEngine.update(onDone);
@@ -341,7 +346,7 @@ Refine.createUpdateFunction = function(options, onFinallyDone) {
 /*
  * Registers a callback function to be called after each update.
  * This is provided for extensions which need to run some code when
- * the project is updated. This was introduced for the Wikidata 
+ * the project is updated. This was introduced for the Wikidata
  * extension as a means to avoid monkey-patching Refine's core
  * methods (which was the solution adopted for GOKb, as they had
  * no way to change Refine's code directly).
@@ -434,6 +439,8 @@ Refine.postProcess = function(moduleName, command, params, body, updateOptions, 
 
         if ("historyEntry" in o) {
           ui.processPanel.showUndo(o.historyEntry);
+        } else if ("historyEntries" in o) {
+          ui.processPanel.showMultipleUndo(o.historyEntries);
         }
       } else if (o.code == "pending") {
         if ("onPending" in callbacks) {
@@ -448,48 +455,29 @@ Refine.postProcess = function(moduleName, command, params, body, updateOptions, 
     }
   }
 
-  Refine.setAjaxInProgress();
+  var runChange = function() {
+    Refine.setAjaxInProgress();
 
-  Refine.postCSRF(
-    "command/" + moduleName + "/" + command + "?" + $.param(params),
-    body,
-    onDone,
-    "json"
-  );
+    Refine.postCSRF(
+        "command/" + moduleName + "/" + command + "?" + $.param(params),
+        body,
+        onDone,
+        "json"
+    );
 
-  window.setTimeout(function() {
-    if (!done) {
-      dismissBusy = DialogSystem.showBusy();
-    }
-  }, 500);
-};
-
-// Requests a CSRF token and calls the supplied callback
-// with the token
-Refine.wrapCSRF = function(onCSRF) {
-   $.get(
-      "command/core/get-csrf-token",
-      {},
-      function(response) {
-         onCSRF(response['token']);
-      },
-      "json"
-   );
-};
-
-// Performs a POST request where an additional CSRF token
-// is supplied in the POST data. The arguments match those
-// of $.post().
-Refine.postCSRF = function(url, data, success, dataType) {
-   Refine.wrapCSRF(function(token) {
-      var fullData = data || {};
-      if (typeof fullData == 'string') {
-         fullData = fullData + "&" + $.param({csrf_token: token});
-      } else {
-         fullData['csrf_token'] = token;
+    window.setTimeout(function() {
+      if (!done) {
+        dismissBusy = DialogSystem.showBusy();
       }
-      $.post(url, fullData, success, dataType);
-   });
+    }, 500);
+  }
+
+  var undoneChanges = ui.historyPanel.undoneChanges();
+  if (Refine.getPreference("ui.history.warnAgainstDeletion", 'true') === 'true' && undoneChanges.length > 0 && (!("warnAgainstHistoryErasure" in updateOptions) || updateOptions.warnAgainstHistoryErasure)) {
+    Refine._confirmHistoryErasure(undoneChanges, runChange);
+  } else {
+    runChange();
+  }
 };
 
 Refine.setAjaxInProgress = function() {
@@ -498,6 +486,50 @@ Refine.setAjaxInProgress = function() {
 
 Refine.clearAjaxInProgress = function() {
   $(document.body).attr("ajax_in_progress", "false");
+};
+
+/**
+ * Confirmation of erasure of history, when applying an operation with changes undone
+ */
+Refine._confirmHistoryErasure = function(entries, onDone) {
+  var self = this;
+  var frame = $(DOM.loadHTML("core", "scripts/util/confirm-history-erasure-dialog.html"));
+  var elmts = DOM.bind(frame);
+  var level = DialogSystem.showDialog(frame);
+  
+  elmts.dialogHeader.text($.i18n('core-project/confirm-erasure-of-project-history'));
+  elmts.warningText.text($.i18n('core-project/applying-change-erases-entries', entries.length));
+  elmts.doNotWarnText.text($.i18n('core-project/do-not-warn'));
+  elmts.cancelButton.text($.i18n('core-buttons/cancel'));
+  elmts.okButton.text($.i18n('core-buttons/apply-anyway'));
+
+  // populate the history entries
+  for (let entry of entries) {
+    var entryDom = $(DOM.loadHTML("core", "scripts/project/history-entry.html")).appendTo(elmts.entryList);
+    var entryElmts = DOM.bind(entryDom);
+    entryElmts.entryDescription.text(entry.description);
+    if (entry.operation_id !== undefined && OperationIconRegistry.getIcon(entry.operation_id) !== undefined) {
+      entryElmts.operationIcon.append($('<img>')
+        .attr('src', OperationIconRegistry.getIcon(entry.operation_id)));
+    }
+  }
+
+  var updateWarnPreferences = function () {
+    var doNotWarnCheckBox = elmts.doNotWarnCheckbox.is(':checked');
+    if (doNotWarnCheckBox) {
+      Refine.setPreference('ui.history.warnAgainstDeletion', 'false');
+    }
+  };
+  
+  elmts.form.on('submit', function() {
+    DialogSystem.dismissUntil(level - 1);
+    updateWarnPreferences();
+    onDone();
+  });
+  elmts.cancelButton.on('click',function() {
+    updateWarnPreferences();
+    DialogSystem.dismissUntil(level - 1);
+  });
 };
 
 /*
@@ -535,7 +567,11 @@ Refine.columnNameToColumnIndex = function(columnName) {
   return -1;
 };
 
-Refine.fetchRows = function(start, limit, onDone, sorting) {
+/*
+  Fetch rows after or before a given row id. The engine configuration can also
+  be used to set filters (facets) or switch between rows/records mode.
+*/
+Refine.fetchRows = function(paginationOptions, limit, onDone, sorting) {
   var body = {
     engine: JSON.stringify(ui.browsingEngine.getJSON())
   };
@@ -544,7 +580,7 @@ Refine.fetchRows = function(start, limit, onDone, sorting) {
   }
 
   $.post(
-    "command/core/get-rows?" + $.param({ project: theProject.id, start: start, limit: limit }),
+    "command/core/get-rows?" + $.param({ ...paginationOptions, project: theProject.id, limit: limit }),
     body,
     function(data) {
       if(data.code === "error") {
@@ -586,7 +622,7 @@ Refine.getPermanentLink = function() {
  */
 
 function onLoad() {
-  var params = URL.getParameters();
+  var params = URLUtil.getParameters();
   if ("project" in params) {
     var uiState = {};
     if ("ui" in params) {

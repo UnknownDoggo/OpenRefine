@@ -33,36 +33,43 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.operations.row;
 
- import java.util.ArrayList;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.browsing.FilteredRows;
 import com.google.refine.browsing.RowVisitor;
 import com.google.refine.history.Change;
 import com.google.refine.history.HistoryEntry;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Row;
 import com.google.refine.model.changes.MassChange;
 import com.google.refine.model.changes.RowStarChange;
 import com.google.refine.operations.EngineDependentOperation;
+import com.google.refine.operations.OperationDescription;
+import com.google.refine.operations.OperationHistoryEntry;
 
 public class RowStarOperation extends EngineDependentOperation {
+
     final protected boolean _starred;
 
     @JsonCreator
     public RowStarOperation(
-            @JsonProperty("engineConfig")
-            EngineConfig engineConfig,
-            @JsonProperty("starred")
-            boolean starred) {
+            @JsonProperty("engineConfig") EngineConfig engineConfig,
+            @JsonProperty("starred") boolean starred) {
         super(engineConfig);
         _starred = starred;
     }
-    
+
     @JsonProperty("starred")
     public boolean getStarred() {
         return _starred;
@@ -70,36 +77,52 @@ public class RowStarOperation extends EngineDependentOperation {
 
     @Override
     protected String getBriefDescription(Project project) {
-        return (_starred ? "Star rows" : "Unstar rows");
+        return _starred ? OperationDescription.row_star_brief() : OperationDescription.row_unstar_brief();
     }
 
-   @Override
-protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) throws Exception {
+    @Override
+    protected Optional<Set<String>> getColumnDependenciesWithoutEngine() {
+        return Optional.of(Set.of());
+    }
+
+    @JsonIgnore
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.empty());
+    }
+
+    @Override
+    public RowStarOperation renameColumns(Map<String, String> newColumnNames) {
+        return new RowStarOperation(_engineConfig.renameColumnDependencies(newColumnNames), _starred);
+    }
+
+    @Override
+    protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) throws Exception {
         Engine engine = createEngine(project);
-        
+
         List<Change> changes = new ArrayList<Change>(project.rows.size());
-        
+
         FilteredRows filteredRows = engine.getAllFilteredRows();
         filteredRows.accept(project, createRowVisitor(project, changes));
-        
+
         return new HistoryEntry(
-            historyEntryID,
-            project, 
-            (_starred ? "Star" : "Unstar") + " " + changes.size() + " rows", 
-            this, 
-            new MassChange(changes, false)
-        );
+                historyEntryID,
+                project,
+                // (_starred ? "Star" : "Unstar") + " " + changes.size() + " rows",
+                _starred ? OperationHistoryEntry.row_star(changes.size()) : OperationHistoryEntry.row_unstar(changes.size()),
+                this,
+                new MassChange(changes, false));
     }
 
     protected RowVisitor createRowVisitor(Project project, List<Change> changes) throws Exception {
         return new RowVisitor() {
+
             List<Change> changes;
-            
+
             public RowVisitor init(List<Change> changes) {
                 this.changes = changes;
                 return this;
             }
-            
+
             @Override
             public void start(Project project) {
                 // nothing to do
@@ -109,16 +132,17 @@ protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) 
             public void end(Project project) {
                 // nothing to do
             }
-            
+
             @Override
             public boolean visit(Project project, int rowIndex, Row row) {
                 if (row.starred != _starred) {
                     RowStarChange change = new RowStarChange(rowIndex, _starred);
-                    
+
                     changes.add(change);
                 }
                 return false;
             }
         }.init(changes);
     }
+
 }

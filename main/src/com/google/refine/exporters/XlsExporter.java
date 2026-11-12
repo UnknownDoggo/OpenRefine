@@ -39,31 +39,32 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Properties;
 
-import org.apache.poi.ss.usermodel.Hyperlink;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.poi.common.usermodel.HyperlinkType;
 import org.apache.poi.hssf.usermodel.HSSFWorkbook;
 import org.apache.poi.ss.SpreadsheetVersion;
 import org.apache.poi.ss.usermodel.Cell;
 import org.apache.poi.ss.usermodel.CellStyle;
+import org.apache.poi.ss.usermodel.Hyperlink;
 import org.apache.poi.ss.usermodel.Row;
 import org.apache.poi.ss.usermodel.Sheet;
 import org.apache.poi.ss.usermodel.Workbook;
 import org.apache.poi.ss.util.WorkbookUtil;
 import org.apache.poi.xssf.streaming.SXSSFWorkbook;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.google.refine.ProjectManager;
 import com.google.refine.browsing.Engine;
 import com.google.refine.model.Project;
 import com.google.refine.util.ParsingUtilities;
 
 public class XlsExporter implements StreamExporter {
+
     final private boolean xml;
-    
+
     public XlsExporter(boolean xml) {
         this.xml = xml;
     }
-    
+
     @Override
     public String getContentType() {
         return xml ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/vnd.ms-excel";
@@ -74,12 +75,16 @@ public class XlsExporter implements StreamExporter {
             OutputStream outputStream) throws IOException {
 
         final Workbook wb = xml ? new SXSSFWorkbook() : new HSSFWorkbook();
-        
+        final int maxRows = getSpreadsheetVersion().getMaxRows();
+        final int maxColumns = getSpreadsheetVersion().getMaxColumns();
+        final int maxTextLength = getSpreadsheetVersion().getMaxTextLength();
+
         TabularSerializer serializer = new TabularSerializer() {
+
             Sheet s;
             int rowCount = 0;
             CellStyle dateStyle;
-            
+
             @Override
             public void startFile(JsonNode options) {
                 s = wb.createSheet();
@@ -98,18 +103,18 @@ public class XlsExporter implements StreamExporter {
 
             @Override
             public void addRow(List<CellData> cells, boolean isHeader) {
+                if (rowCount >= maxRows) {
+                    throw new ExporterException(String.format("Maximum number of rows exceeded for export format (%d)", maxRows));
+                }
                 Row r = s.createRow(rowCount++);
-                int maxColumns = getSpreadsheetVersion().getMaxColumns();
-                int maxTextLength = getSpreadsheetVersion().getMaxTextLength();
 
                 for (int i = 0; i < cells.size(); i++) {
                     Cell c = r.createCell(i);
                     if (i == (maxColumns - 1) && cells.size() > maxColumns) {
-                        c.setCellValue("ERROR: TOO MANY COLUMNS");
-                        break;
+                        throw new ExporterException(String.format("Maximum number of columns exceeded for export format (%d)", maxColumns));
                     } else {
                         CellData cellData = cells.get(i);
-                        
+
                         if (cellData != null && cellData.text != null && cellData.value != null) {
                             Object v = cellData.value;
                             if (v instanceof Number) {
@@ -117,45 +122,46 @@ public class XlsExporter implements StreamExporter {
                             } else if (v instanceof Boolean) {
                                 c.setCellValue(((Boolean) v).booleanValue());
                             } else if (v instanceof OffsetDateTime) {
-                                OffsetDateTime odt = (OffsetDateTime)v;
+                                OffsetDateTime odt = (OffsetDateTime) v;
                                 c.setCellValue(ParsingUtilities.offsetDateTimeToCalendar(odt));
                                 c.setCellStyle(dateStyle);
                             } else {
                                 String s = cellData.text;
                                 if (s.length() > maxTextLength) {
-                                    // The maximum length of cell contents (text) is 32,767 characters
-                                    s = s.substring(0, maxTextLength);
+                                    throw new ExporterException(
+                                            String.format("Maximum size (%d) of cell [%d, %d] exceeded for export format", maxTextLength,
+                                                    rowCount, i));
                                 }
                                 c.setCellValue(s);
                             }
-                            
+
                             if (cellData.link != null) {
-                            	try {
-                            		Hyperlink hl = wb.getCreationHelper().createHyperlink(HyperlinkType.URL);
-                            		hl.setLabel(cellData.text);
-                            		hl.setAddress(cellData.link);
-                            		c.setHyperlink(hl);
-                            	} catch(IllegalArgumentException e) {
-                            		// If we failed to create the hyperlink and add it to the cell,
-                            		// we just use the string value as fallback
-                            	}
+                                try {
+                                    Hyperlink hl = wb.getCreationHelper().createHyperlink(HyperlinkType.URL);
+                                    hl.setLabel(cellData.text);
+                                    hl.setAddress(cellData.link);
+                                    c.setHyperlink(hl);
+                                } catch (IllegalArgumentException e) {
+                                    // If we failed to create the hyperlink and add it to the cell,
+                                    // we just use the string value as fallback
+                                }
                             }
                         }
                     }
                 }
             }
         };
-        
+
         CustomizableTabularExporterUtilities.exportRows(
                 project, engine, params, serializer);
-        
+
         wb.write(outputStream);
         outputStream.flush();
         wb.close();
     }
 
     /**
-     * @return POI <code></code>SpreadsheetVersion</code> with metadata about row and column limits
+     * @return POI <code></code>SpreadsheetVersion</code> with metadata about cell, row and column limits
      */
     SpreadsheetVersion getSpreadsheetVersion() {
         return xml ? SpreadsheetVersion.EXCEL2007 : SpreadsheetVersion.EXCEL97;

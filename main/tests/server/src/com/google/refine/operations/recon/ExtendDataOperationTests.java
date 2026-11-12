@@ -33,27 +33,30 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.operations.recon;
 
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
-import static org.powermock.api.mockito.PowerMockito.mockStatic;
+import static org.testng.Assert.assertEquals;
 
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.Serializable;
 import java.io.StringWriter;
+import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 
-import org.apache.commons.io.IOUtils;
-import org.mockito.invocation.InvocationOnMock;
-import org.mockito.stubbing.Answer;
-import org.powermock.api.mockito.PowerMockito;
-import org.powermock.core.classloader.annotations.PrepareForTest;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.TextNode;
+import mockwebserver3.Dispatcher;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
 import org.slf4j.LoggerFactory;
 import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
@@ -61,33 +64,33 @@ import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Test;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.google.refine.RefineTest;
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.model.Cell;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.ModelException;
 import com.google.refine.model.Project;
 import com.google.refine.model.Recon;
 import com.google.refine.model.ReconCandidate;
 import com.google.refine.model.Row;
+import com.google.refine.model.recon.DataExtensionReconConfig;
 import com.google.refine.model.recon.ReconciledDataExtensionJob;
 import com.google.refine.model.recon.ReconciledDataExtensionJob.DataExtensionConfig;
 import com.google.refine.operations.EngineDependentOperation;
+import com.google.refine.operations.OperationDescription;
 import com.google.refine.operations.OperationRegistry;
-import com.google.refine.process.LongRunningProcessStub;
 import com.google.refine.process.Process;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
-@PrepareForTest(ReconciledDataExtensionJob.class)
 public class ExtendDataOperationTests extends RefineTest {
 
     static final String ENGINE_JSON_URLS = "{\"mode\":\"row-based\"}}";
     static final String RECON_SERVICE = "https://tools.wmflabs.org/openrefine-wikidata/en/api";
     static final String RECON_IDENTIFIER_SPACE = "http://www.wikidata.org/entity/";
     static final String RECON_SCHEMA_SPACE = "http://www.wikidata.org/prop/direct/";
-    
+
     private String dataExtensionConfigJson = "{"
             + "    \"properties\":["
             + "        {\"name\":\"inception\",\"id\":\"P571\"},"
@@ -95,9 +98,9 @@ public class ExtendDataOperationTests extends RefineTest {
             + "        {\"name\":\"coordinate location\",\"id\":\"P625\"}"
             + "     ]"
             + "}";
-    
-    private String operationJson = "{\"op\":\"core/extend-reconciled-data\","
-            + "\"description\":\"Extend data at index 3 based on column organization_name\","
+
+    private String operationJsonLegacy = "{\"op\":\"core/extend-reconciled-data\","
+            + "\"description\":" + new TextNode(OperationDescription.recon_extend_data_brief(3, "organization_name")).toString() + ","
             + "\"engineConfig\":{\"mode\":\"row-based\",\"facets\":["
             + "    {\"selectNumeric\":true,\"expression\":\"cell.recon.best.score\",\"selectBlank\":false,\"selectNonNumeric\":true,\"selectError\":true,\"name\":\"organization_name: best candidate's score\",\"from\":13,\"to\":101,\"type\":\"range\",\"columnName\":\"organization_name\"},"
             + "    {\"selectNonTime\":true,\"expression\":\"grel:toDate(value)\",\"selectBlank\":true,\"selectError\":true,\"selectTime\":true,\"name\":\"start_year\",\"from\":410242968000,\"to\":1262309184000,\"type\":\"timerange\",\"columnName\":\"start_year\"}"
@@ -114,19 +117,41 @@ public class ExtendDataOperationTests extends RefineTest {
             + "        {\"name\":\"coordinate location\",\"id\":\"P625\"}"
             + "     ]"
             + "}}";
-    
+
+    private String operationJsonWithResultColumns = "{\"op\":\"core/extend-reconciled-data\","
+            + "\"description\":" + new TextNode(OperationDescription.recon_extend_data_brief(3, "organization_name")).toString() + ","
+            + "\"engineConfig\":{\"mode\":\"row-based\",\"facets\":["
+            + "    {\"selectNumeric\":true,\"expression\":\"cell.recon.best.score\",\"selectBlank\":false,\"selectNonNumeric\":true,\"selectError\":true,\"name\":\"organization_name: best candidate's score\",\"from\":13,\"to\":101,\"type\":\"range\",\"columnName\":\"organization_name\"},"
+            + "    {\"selectNonTime\":true,\"expression\":\"grel:toDate(value)\",\"selectBlank\":true,\"selectError\":true,\"selectTime\":true,\"name\":\"start_year\",\"from\":410242968000,\"to\":1262309184000,\"type\":\"timerange\",\"columnName\":\"start_year\"}"
+            + "]},"
+            + "\"columnInsertIndex\":3,"
+            + "\"baseColumnName\":\"organization_name\","
+            + "\"endpoint\":\"https://tools.wmflabs.org/openrefine-wikidata/en/api\","
+            + "\"identifierSpace\":\"http://www.wikidata.org/entity/\","
+            + "\"schemaSpace\":\"http://www.wikidata.org/prop/direct/\","
+            + "\"extension\":{"
+            + "    \"properties\":["
+            + "        {\"name\":\"inception\",\"id\":\"P571\"},"
+            + "        {\"name\":\"headquarters location\",\"id\":\"P159\"},"
+            + "        {\"name\":\"coordinate location\",\"id\":\"P625\"}"
+            + "     ]"
+            + "},"
+            + "\"resultColumnNames\": [\"inception 2\", \"headquarters location\", \"coordinate location\"]}";
+
     private String processJson = ""
-            + "    {\n" + 
-            "       \"description\" : \"Extend data at index 3 based on column organization_name\",\n" + 
-            "       \"id\" : %d,\n" + 
-            "       \"immediate\" : false,\n" + 
-            "       \"progress\" : 0,\n" + 
-            "       \"status\" : \"pending\"\n" + 
+            + "    {\n" +
+            "       \"description\" : " + new TextNode(OperationDescription.recon_extend_data_brief(3, "organization_name")).toString()
+            + ",\n" +
+            "       \"id\" : %d,\n" +
+            "       \"immediate\" : false,\n" +
+            "       \"progress\" : 0,\n" +
+            "       \"status\" : \"pending\"\n" +
             "     }";
-    
+
     private Map<JsonNode, String> mockedResponses = new HashMap<>();
-    
+
     static public class ReconciledDataExtensionJobStub extends ReconciledDataExtensionJob {
+
         public ReconciledDataExtensionJobStub(DataExtensionConfig obj, String endpoint) {
             super(obj, endpoint);
         }
@@ -146,53 +171,89 @@ public class ExtendDataOperationTests extends RefineTest {
 
     // dependencies
     Project project;
+    Cell reconCell1, reconCell2, reconCell3, reconCell4;
     Properties options;
     EngineConfig engine_config;
     Engine engine;
 
+    // HTTP mocking
+    Dispatcher dispatcher;
 
     @BeforeMethod
     public void SetUp() throws IOException, ModelException {
         OperationRegistry.registerOperation(getCoreModule(), "extend-reconciled-data", ExtendDataOperation.class);
         project = createProjectWithColumns("DataExtensionTests", "country");
-        
+        project.columnModel.getColumnByName("country").setReconConfig(new DataExtensionReconConfig(RECON_SERVICE,
+                RECON_IDENTIFIER_SPACE,
+                RECON_SCHEMA_SPACE, null));
+
         options = mock(Properties.class);
         engine = new Engine(project);
-        engine_config = EngineConfig.reconstruct(ENGINE_JSON_URLS);
+        engine_config = EngineConfig.deserialize(ENGINE_JSON_URLS);
         engine.initializeFromConfig(engine_config);
         engine.setMode(Engine.Mode.RowBased);
 
-               Row row = new Row(2);
-        row.setCell(0, reconciledCell("Iran", "Q794"));
+        Row row = new Row(2);
+        reconCell1 = reconciledCell("Iran", "Q794");
+        row.setCell(0, reconCell1);
         project.rows.add(row);
         row = new Row(2);
-        row.setCell(0, reconciledCell("Japan", "Q17"));
+        reconCell2 = reconciledCell("Japan", "Q17");
+        row.setCell(0, reconCell2);
         project.rows.add(row);
         row = new Row(2);
-        row.setCell(0, reconciledCell("Tajikistan", "Q863"));
+        reconCell3 = reconciledCell("Tajikistan", "Q863");
+        row.setCell(0, reconCell3);
         project.rows.add(row);
         row = new Row(2);
-        row.setCell(0, reconciledCell("United States of America", "Q30"));
+        reconCell4 = reconciledCell("United States of America", "Q30");
+        row.setCell(0, reconCell4);
         project.rows.add(row);
+
+        dispatcher = new Dispatcher() {
+
+            @Override
+            public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
+                String json = URLDecoder.decode(request.getBody().utf8().split("=")[1], StandardCharsets.UTF_8);
+                JsonNode parsedQuery;
+                try {
+                    parsedQuery = ParsingUtilities.mapper.readTree(json);
+                } catch (IOException e) {
+                    throw new IllegalArgumentException("HTTP call with invalid JSON payload: " + json);
+                }
+                if (mockedResponses.containsKey(parsedQuery)) {
+                    return new MockResponse.Builder().code(200).body(mockedResponses.get(parsedQuery)).build();
+                } else {
+                    throw new IllegalArgumentException("HTTP call not mocked for query: " + json);
+                }
+            }
+
+        };
     }
-    
+
     @Test
-    public void serializeExtendDataOperation() throws Exception {
-        TestUtils.isSerializedTo(ParsingUtilities.mapper.readValue(operationJson, ExtendDataOperation.class), operationJson);
+    public void serializeExtendDataOperationLegacy() throws Exception {
+        TestUtils.isSerializedTo(ParsingUtilities.mapper.readValue(operationJsonLegacy, ExtendDataOperation.class), operationJsonLegacy);
     }
-    
+
+    @Test
+    public void serializeExtendDataOperationWithResultColumns() throws Exception {
+        TestUtils.isSerializedTo(ParsingUtilities.mapper.readValue(operationJsonWithResultColumns, ExtendDataOperation.class),
+                operationJsonWithResultColumns);
+    }
+
     @Test
     public void serializeExtendDataProcess() throws Exception {
-        Process p = ParsingUtilities.mapper.readValue(operationJson, ExtendDataOperation.class)
+        Process p = ParsingUtilities.mapper.readValue(operationJsonLegacy, ExtendDataOperation.class)
                 .createProcess(project, new Properties());
         TestUtils.isSerializedTo(p, String.format(processJson, p.hashCode()));
     }
-    
+
     @Test
     public void serializeDataExtensionConfig() throws IOException {
         TestUtils.isSerializedTo(DataExtensionConfig.reconstruct(dataExtensionConfigJson), dataExtensionConfigJson);
     }
-    
+
     @Test
     public void testFormulateQuery() throws IOException {
         DataExtensionConfig config = DataExtensionConfig.reconstruct(dataExtensionConfigJson);
@@ -201,7 +262,6 @@ public class ExtendDataOperationTests extends RefineTest {
         ReconciledDataExtensionJobStub stub = new ReconciledDataExtensionJobStub(config, "http://endpoint");
         TestUtils.assertEqualsAsJson(stub.formulateQueryStub(ids, config), json);
     }
-   
 
     @AfterMethod
     public void TearDown() {
@@ -211,77 +271,135 @@ public class ExtendDataOperationTests extends RefineTest {
     }
 
     static public Cell reconciledCell(String name, String id) {
-       ReconCandidate r = new ReconCandidate(id, name, new String[0], 100);
-       List<ReconCandidate> candidates = new ArrayList<ReconCandidate>();
-       candidates.add(r);
-       Recon rec = new Recon(0, RECON_IDENTIFIER_SPACE, RECON_SCHEMA_SPACE);
-       rec.service = RECON_SERVICE;
-       rec.candidates = candidates;
-       rec.match = r;
-       return new Cell(name, rec);
+        ReconCandidate r = new ReconCandidate(id, name, new String[0], 100);
+        List<ReconCandidate> candidates = new ArrayList<ReconCandidate>();
+        candidates.add(r);
+        Recon rec = new Recon(0, RECON_IDENTIFIER_SPACE, RECON_SCHEMA_SPACE);
+        rec.service = RECON_SERVICE;
+        rec.candidates = candidates;
+        rec.match = r;
+        return new Cell(name, rec);
     }
 
-    /**
-     * Test to fetch simple strings
-     * @throws Exception 
-     */
-    
-    @BeforeMethod
-    public void mockHttpCalls() throws Exception {
-    	mockStatic(ReconciledDataExtensionJob.class);
-    	PowerMockito.spy(ReconciledDataExtensionJob.class);
-    	Answer<String> mockedResponse = new Answer<String>() {
-			@Override
-			public String answer(InvocationOnMock invocation) throws Throwable {
-				return fakeHttpCall(invocation.getArgument(0), invocation.getArgument(1));
-			}
-    	};
-    	PowerMockito.doAnswer(mockedResponse).when(ReconciledDataExtensionJob.class, "performQuery", anyString(), anyString());
-    }
-    
     @AfterMethod
     public void cleanupHttpMocks() {
-    	mockedResponses.clear();
+        mockedResponses.clear();
+    }
+
+    @Test
+    public void testColumnDependencies() throws IOException {
+        DataExtensionConfig extension = DataExtensionConfig
+                .reconstruct("{\"properties\":[{\"id\":\"P297\",\"name\":\"ISO 3166-1 alpha-2 code\"}]}");
+        EngineDependentOperation op = new ExtendDataOperation(engine_config,
+                "country",
+                "https://foo.com/bar",
+                RECON_IDENTIFIER_SPACE,
+                RECON_SCHEMA_SPACE,
+                extension,
+                1,
+                List.of("ISO 3166-1 alpha-2 code"));
+
+        assertEquals(op.getColumnDependencies(), Optional.of(Set.of("country")));
+        assertEquals(op.getColumnsDiff(), Optional.of(ColumnsDiff.builder().addColumn("ISO 3166-1 alpha-2 code", "country").build()));
     }
 
     @Test
     public void testFetchStrings() throws Exception {
-  
-        DataExtensionConfig extension = DataExtensionConfig.reconstruct("{\"properties\":[{\"id\":\"P297\",\"name\":\"ISO 3166-1 alpha-2 code\"}]}");
-        
-        mockHttpCall("{\"ids\":[\"Q863\",\"Q794\",\"Q17\",\"Q30\"],\"properties\":[{\"id\":\"P297\"}]}",
-      		  "{"
-  			+ "\"rows\": {"
-  			+ "    \"Q794\": {\"P297\": [{\"str\": \"IR\"}]},"
-  			+ "    \"Q863\": {\"P297\": [{\"str\": \"TJ\"}]},"
-  			+ "    \"Q30\": {\"P297\": [{\"str\": \"US\"}]},"
-  			+ "    \"Q17\": {\"P297\": [{\"str\": \"JP\"}]}"
-  			+ "},"
-  			+ "\"meta\": ["
-  			+ "   {\"name\": \"ISO 3166-1 alpha-2 code\", \"id\": \"P297\"}"
-  			+ "]}");
-        
-        EngineDependentOperation op = new ExtendDataOperation(engine_config,
-                "country",
-                RECON_SERVICE,
-                RECON_IDENTIFIER_SPACE,
-                RECON_SCHEMA_SPACE,
-                extension,
-                1);
-        LongRunningProcessStub process = new LongRunningProcessStub(op.createProcess(project, options));
-        process.run();
 
-        // Inspect rows
-        Assert.assertTrue("IR".equals(project.rows.get(0).getCellValue(1)), "Bad country code for Iran.");
-        Assert.assertTrue("JP".equals(project.rows.get(1).getCellValue(1)), "Bad country code for Japan.");
-        Assert.assertTrue("TJ".equals(project.rows.get(2).getCellValue(1)), "Bad country code for Tajikistan.");
-        Assert.assertTrue("US".equals(project.rows.get(3).getCellValue(1)), "Bad country code for United States.");
+        DataExtensionConfig extension = DataExtensionConfig
+                .reconstruct("{\"properties\":[{\"id\":\"P297\",\"name\":\"ISO 3166-1 alpha-2 code\"}]}");
 
-        // Make sure we did not create any recon stats for that column (no reconciled value)
-        Assert.assertTrue(project.columnModel.getColumnByName("ISO 3166-1 alpha-2 code").getReconStats() == null);
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            server.setDispatcher(dispatcher);
+
+            mockHttpCall("{\"ids\":[\"Q863\",\"Q794\",\"Q17\",\"Q30\"],\"properties\":[{\"id\":\"P297\"}]}",
+                    "{"
+                            + "\"rows\": {"
+                            + "    \"Q794\": {\"P297\": [{\"str\": \"IR\"}]},"
+                            + "    \"Q863\": {\"P297\": []},"
+                            + "    \"Q30\": {\"P297\": [{\"str\": \"US\"}]},"
+                            + "    \"Q17\": {\"P297\": [{\"str\": \"JP\"}]}"
+                            + "},"
+                            + "\"meta\": ["
+                            + "   {\"name\": \"ISO 3166-1 alpha-2 code\", \"id\": \"P297\"}"
+                            + "]}");
+
+            EngineDependentOperation op = new ExtendDataOperation(engine_config,
+                    "country",
+                    server.url("/reconcile").url().toString(),
+                    RECON_IDENTIFIER_SPACE,
+                    RECON_SCHEMA_SPACE,
+                    extension,
+                    1,
+                    List.of("ISO 3166-1 alpha-2 code"));
+
+            runOperation(op, project);
+
+            Project expectedProject = createProject(
+                    new String[] { "country", "ISO 3166-1 alpha-2 code" },
+                    new Serializable[][] {
+                            { reconCell1, "IR" },
+                            { reconCell2, "JP" },
+                            { reconCell3, null },
+                            { reconCell4, "US" },
+                    });
+            assertProjectEquals(project, expectedProject);
+
+            // Make sure we did not create any recon stats for that column (no reconciled value)
+            Assert.assertTrue(project.columnModel.getColumnByName("ISO 3166-1 alpha-2 code").getReconStats() == null);
+            // adding an assertion for sourceReconConfig
+            Assert.assertTrue(project.columnModel.getColumnByName("ISO 3166-1 alpha-2 code").getSourceReconConfig() != null);
+
+        }
     }
 
-     /**
+    @Test
+    public void testFetchOtherDatatypes() throws Exception {
+
+        DataExtensionConfig extension = DataExtensionConfig
+                .reconstruct("{\"properties\":[{\"id\":\"P123\",\"name\":\"dummy property\"}]}");
+
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            server.setDispatcher(dispatcher);
+
+            mockHttpCall("{\"ids\":[\"Q863\",\"Q794\",\"Q17\",\"Q30\"],\"properties\":[{\"id\":\"P123\"}]}",
+                    "{"
+                            + "\"rows\": {"
+                            + "    \"Q794\": {\"P123\": [{\"int\": 4}]},"
+                            + "    \"Q863\": {\"P123\": []},"
+                            + "    \"Q30\": {\"P123\": [{\"date\": \"2023-05-03T04:05:06Z\"}]},"
+                            + "    \"Q17\": {\"P123\": [{\"bool\": true}]}"
+                            + "},"
+                            + "\"meta\": ["
+                            + "   {\"name\": \"dummy property\", \"id\": \"P123\"}"
+                            + "]}");
+
+            EngineDependentOperation op = new ExtendDataOperation(engine_config,
+                    "country",
+                    server.url("/reconcile").url().toString(),
+                    RECON_IDENTIFIER_SPACE,
+                    RECON_SCHEMA_SPACE,
+                    extension,
+                    1,
+                    List.of("dummy property"));
+
+            runOperation(op, project);
+
+            Project expectedProject = createProject(
+                    new String[] { "country", "dummy property" },
+                    new Serializable[][] {
+                            { reconCell1, 4 },
+                            { reconCell2, true },
+                            { reconCell3, null },
+                            { reconCell4, OffsetDateTime.parse("2023-05-03T04:05:06Z") },
+                    });
+            assertProjectEquals(project, expectedProject);
+        }
+    }
+
+    /**
      * Test to fetch counts of values
      */
 
@@ -289,36 +407,48 @@ public class ExtendDataOperationTests extends RefineTest {
     public void testFetchCounts() throws Exception {
         DataExtensionConfig extension = DataExtensionConfig.reconstruct(
                 "{\"properties\":[{\"id\":\"P38\",\"name\":\"currency\",\"settings\":{\"count\":\"on\",\"rank\":\"any\"}}]}");
-        
-        mockHttpCall("{\"ids\":[\"Q863\",\"Q794\",\"Q17\",\"Q30\"],\"properties\":[{\"id\":\"P38\",\"settings\":{\"count\":\"on\",\"rank\":\"any\"}}]}",
-        		"{"
-        		+ "\"rows\": {"
-        		+ "    \"Q794\": {\"P38\": [{\"float\": 1}]},"
-        		+ "    \"Q863\": {\"P38\": [{\"float\": 2}]},"
-        		+ "    \"Q30\": {\"P38\": [{\"float\": 1}]},"
-        		+ "    \"Q17\": {\"P38\": [{\"float\": 1}]}"
-        		+ "},"
-        		+ "\"meta\": ["
-        		+ "    {\"settings\": {\"count\": \"on\", \"rank\": \"any\"}, \"name\": \"currency\", \"id\": \"P38\"}"
-        		+ "]}");
-        
-        EngineDependentOperation op = new ExtendDataOperation(engine_config,
-                "country",
-                RECON_SERVICE,
-                RECON_IDENTIFIER_SPACE,
-                RECON_SCHEMA_SPACE,
-                extension,
-                1);
-        
-        LongRunningProcessStub process = new LongRunningProcessStub(op.createProcess(project, options));
-        process.run();
 
-        // Test to be updated as countries change currencies!
-        Assert.assertTrue(Math.round((double)project.rows.get(2).getCellValue(1)) == 2, "Incorrect number of currencies returned for Tajikistan.");
-        Assert.assertTrue(Math.round((double)project.rows.get(3).getCellValue(1)) == 1, "Incorrect number of currencies returned for United States.");
+        mockHttpCall(
+                "{\"ids\":[\"Q863\",\"Q794\",\"Q17\",\"Q30\"],\"properties\":[{\"id\":\"P38\",\"settings\":{\"count\":\"on\",\"rank\":\"any\"}}]}",
+                "{"
+                        + "\"rows\": {"
+                        + "    \"Q794\": {\"P38\": [{\"float\": 1}]},"
+                        + "    \"Q863\": {\"P38\": [{\"float\": 2}]},"
+                        + "    \"Q30\": {\"P38\": [{\"float\": 1}]},"
+                        + "    \"Q17\": {\"P38\": [{\"float\": 1}]}"
+                        + "},"
+                        + "\"meta\": ["
+                        + "    {\"settings\": {\"count\": \"on\", \"rank\": \"any\"}, \"name\": \"currency\", \"id\": \"P38\"}"
+                        + "]}");
 
-        // Make sure we did not create any recon stats for that column (no reconciled value)
-        Assert.assertTrue(project.columnModel.getColumnByName("currency").getReconStats() == null);
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            server.setDispatcher(dispatcher);
+
+            EngineDependentOperation op = new ExtendDataOperation(engine_config,
+                    "country",
+                    server.url("/reconcile").url().toString(),
+                    RECON_IDENTIFIER_SPACE,
+                    RECON_SCHEMA_SPACE,
+                    extension,
+                    1,
+                    List.of("currency 2"));
+
+            runOperation(op, project);
+
+            Project expectedProject = createProject(
+                    new String[] { "country", "currency 2" },
+                    new Serializable[][] {
+                            { reconCell1, 1.0 },
+                            { reconCell2, 1.0 },
+                            { reconCell3, 2.0 },
+                            { reconCell4, 1.0 },
+                    });
+            assertProjectEquals(project, expectedProject);
+
+            // Make sure we did not create any recon stats for that column (no reconciled value)
+            Assert.assertTrue(project.columnModel.getColumnByName("currency 2").getReconStats() == null);
+        }
     }
 
     /**
@@ -328,39 +458,43 @@ public class ExtendDataOperationTests extends RefineTest {
     public void testFetchCurrent() throws Exception {
         DataExtensionConfig extension = DataExtensionConfig.reconstruct(
                 "{\"properties\":[{\"id\":\"P38\",\"name\":\"currency\",\"settings\":{\"rank\":\"best\"}}]}");
-        
+
         mockHttpCall("{\"ids\":[\"Q863\",\"Q794\",\"Q17\",\"Q30\"],\"properties\":[{\"id\":\"P38\",\"settings\":{\"rank\":\"best\"}}]}",
-        		"{\"rows\":{"
-        		+ "   \"Q794\": {\"P38\": [{\"name\": \"Iranian rial\", \"id\": \"Q188608\"}]},"
-        		+ "   \"Q863\": {\"P38\": [{\"name\": \"Tajikistani somoni\", \"id\": \"Q199886\"}]},"
-        		+ "   \"Q30\": {\"P38\": [{\"name\": \"United States dollar\", \"id\": \"Q4917\"}]},"
-        		+ "   \"Q17\": {\"P38\": [{\"name\": \"Japanese yen\", \"id\": \"Q8146\"}]}"
-        		+ "}, \"meta\": ["
-        		+ "     {\"settings\": {\"rank\": \"best\"}, \"name\": \"currency\", \"id\": \"P38\"}"
-        		+ "]}");
-        
-        EngineDependentOperation op = new ExtendDataOperation(engine_config,
-                "country",
-                RECON_SERVICE,
-                RECON_IDENTIFIER_SPACE,
-                RECON_SCHEMA_SPACE,
-                extension,
-                1);
-        LongRunningProcessStub process = new LongRunningProcessStub(op.createProcess(project, options));
-        process.run();
+                "{\"rows\":{"
+                        + "   \"Q794\": {\"P38\": [{\"name\": \"Iranian rial\", \"id\": \"Q188608\"}]},"
+                        + "   \"Q863\": {\"P38\": [{\"name\": \"Tajikistani somoni\", \"id\": \"Q199886\"}]},"
+                        + "   \"Q30\": {\"P38\": [{\"name\": \"United States dollar\", \"id\": \"Q4917\"}]},"
+                        + "   \"Q17\": {\"P38\": [{\"name\": \"Japanese yen\", \"id\": \"Q8146\"}]}"
+                        + "}, \"meta\": ["
+                        + "     {\"settings\": {\"rank\": \"best\"}, \"name\": \"currency\", \"id\": \"P38\"}"
+                        + "]}");
 
-        /*
-          * Tajikistan has one "preferred" currency and one "normal" one
-          * (in terms of statement ranks).
-          * But thanks to our setting in the extension configuration,
-          * we only fetch the current one, so the one just after it is
-          * the one for the US (USD).
-          */
-        Assert.assertTrue("Tajikistani somoni".equals(project.rows.get(2).getCellValue(1)));
-        Assert.assertTrue("United States dollar".equals(project.rows.get(3).getCellValue(1)));
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            server.setDispatcher(dispatcher);
 
-        // Make sure all the values are reconciled
-        Assert.assertTrue(project.columnModel.getColumnByName("currency").getReconStats().matchedTopics == 4);
+            EngineDependentOperation op = new ExtendDataOperation(engine_config,
+                    "country",
+                    server.url("/reconcile").url().toString(),
+                    RECON_IDENTIFIER_SPACE,
+                    RECON_SCHEMA_SPACE,
+                    extension,
+                    1,
+                    List.of("currency"));
+
+            runOperation(op, project);
+
+            /*
+             * Tajikistan has one "preferred" currency and one "normal" one (in terms of statement ranks). But thanks to
+             * our setting in the extension configuration, we only fetch the current one, so the one just after it is
+             * the one for the US (USD).
+             */
+            Assert.assertTrue("Tajikistani somoni".equals(project.rows.get(2).getCellValue(1)));
+            Assert.assertTrue("United States dollar".equals(project.rows.get(3).getCellValue(1)));
+
+            // Make sure all the values are reconciled
+            Assert.assertTrue(project.columnModel.getColumnByName("currency").getReconStats().matchedTopics == 4);
+        }
     }
 
     /**
@@ -370,40 +504,44 @@ public class ExtendDataOperationTests extends RefineTest {
     public void testFetchRecord() throws Exception {
         DataExtensionConfig extension = DataExtensionConfig.reconstruct(
                 "{\"properties\":[{\"id\":\"P38\",\"name\":\"currency\",\"settings\":{\"rank\":\"any\"}}]}");
-        
+
         mockHttpCall("{\"ids\":[\"Q863\",\"Q794\",\"Q17\",\"Q30\"],\"properties\":[{\"id\":\"P38\",\"settings\":{\"rank\":\"any\"}}]}",
-    			"{\"rows\": {"
-    			+ "   \"Q794\": {\"P38\": [{\"name\": \"Iranian rial\", \"id\": \"Q188608\"}]},"
-    			+ "   \"Q863\": {\"P38\": [{\"name\": \"Tajikistani somoni\", \"id\": \"Q199886\"}, {\"name\": \"Tajikistani ruble\", \"id\": \"Q2423956\"}]},"
-    			+ "   \"Q30\": {\"P38\": [{\"name\": \"United States dollar\", \"id\": \"Q4917\"}]},"
-    			+ "   \"Q17\": {\"P38\": [{\"name\": \"Japanese yen\", \"id\": \"Q8146\"}]}"
-    			+ "},"
-    			+ "\"meta\": ["
-    			+ "    {\"settings\": {\"rank\": \"any\"}, \"name\": \"currency\", \"id\": \"P38\"}"
-    			+ "]}");
-        
-        EngineDependentOperation op = new ExtendDataOperation(engine_config,
-                "country",
-                RECON_SERVICE,
-                RECON_IDENTIFIER_SPACE,
-                RECON_SCHEMA_SPACE,
-                extension,
-                1);
-        LongRunningProcessStub process = new LongRunningProcessStub(op.createProcess(project, options));
-        process.run();
+                "{\"rows\": {"
+                        + "   \"Q794\": {\"P38\": [{\"name\": \"Iranian rial\", \"id\": \"Q188608\"}]},"
+                        + "   \"Q863\": {\"P38\": [{\"name\": \"Tajikistani somoni\", \"id\": \"Q199886\"}, {\"name\": \"Tajikistani ruble\", \"id\": \"Q2423956\"}]},"
+                        + "   \"Q30\": {\"P38\": [{\"name\": \"United States dollar\", \"id\": \"Q4917\"}]},"
+                        + "   \"Q17\": {\"P38\": [{\"name\": \"Japanese yen\", \"id\": \"Q8146\"}]}"
+                        + "},"
+                        + "\"meta\": ["
+                        + "    {\"settings\": {\"rank\": \"any\"}, \"name\": \"currency\", \"id\": \"P38\"}"
+                        + "]}");
 
-        /*
-          * Tajikistan has one "preferred" currency and one "normal" one
-          * (in terms of statement ranks).
-          * The second currency is fetched as well, which creates a record
-          * (the cell to the left of it is left blank).
-          */
-        Assert.assertTrue("Tajikistani somoni".equals(project.rows.get(2).getCellValue(1)), "Bad currency name for Tajikistan");
-        Assert.assertTrue("Tajikistani ruble".equals(project.rows.get(3).getCellValue(1)), "Bad currency name for Tajikistan");
-        Assert.assertTrue(null == project.rows.get(3).getCellValue(0));
+        try (MockWebServer server = new MockWebServer()) {
+            server.start();
+            server.setDispatcher(dispatcher);
 
-        // Make sure all the values are reconciled
-        Assert.assertTrue(project.columnModel.getColumnByName("currency").getReconStats().matchedTopics == 5);
+            EngineDependentOperation op = new ExtendDataOperation(engine_config,
+                    "country",
+                    server.url("/reconcile").url().toString(),
+                    RECON_IDENTIFIER_SPACE,
+                    RECON_SCHEMA_SPACE,
+                    extension,
+                    1,
+                    List.of("currency"));
+
+            runOperation(op, project);
+
+            /*
+             * Tajikistan has one "preferred" currency and one "normal" one (in terms of statement ranks). The second
+             * currency is fetched as well, which creates a record (the cell to the left of it is left blank).
+             */
+            Assert.assertTrue("Tajikistani somoni".equals(project.rows.get(2).getCellValue(1)), "Bad currency name for Tajikistan");
+            Assert.assertTrue("Tajikistani ruble".equals(project.rows.get(3).getCellValue(1)), "Bad currency name for Tajikistan");
+            Assert.assertTrue(null == project.rows.get(3).getCellValue(0));
+
+            // Make sure all the values are reconciled
+            Assert.assertTrue(project.columnModel.getColumnByName("currency").getReconStats().matchedTopics == 5);
+        }
     }
 
     private void mockHttpCall(String query, String response) throws IOException {
@@ -411,11 +549,11 @@ public class ExtendDataOperationTests extends RefineTest {
     }
 
     String fakeHttpCall(String endpoint, String query) throws IOException {
-    	  JsonNode parsedQuery = ParsingUtilities.mapper.readTree(query);
-    	  if (mockedResponses.containsKey(parsedQuery)) {
-    		    return mockedResponses.get(parsedQuery);
-    	  } else {
-    		    throw new IllegalArgumentException("HTTP call not mocked for query: "+query);
-    	  }
+        JsonNode parsedQuery = ParsingUtilities.mapper.readTree(query);
+        if (mockedResponses.containsKey(parsedQuery)) {
+            return mockedResponses.get(parsedQuery);
+        } else {
+            throw new IllegalArgumentException("HTTP call not mocked for query: " + query);
+        }
     }
 }

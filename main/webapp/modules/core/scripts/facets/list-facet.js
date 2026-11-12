@@ -39,7 +39,7 @@ class ListFacet extends Facet {
       this._options.sort = "name";
     }
 
-    this._selection = selection || [];
+    this._selection = selection || config.selection || [];
 
     if (!("invert" in this._config)) {
       this._config.invert = false;
@@ -50,6 +50,11 @@ class ListFacet extends Facet {
 
     this._data = null;
 
+    this._initialHeightSet = false;
+  };
+
+  prepareUI() {
+    Refine.showLeftPanel();
     this._initializeUI();
     this._update();
   };
@@ -100,8 +105,17 @@ class ListFacet extends Facet {
     (this._errorChoice !== null && this._errorChoice.s);
   };
 
-  updateState(data) {
+  uniquenessCriterion() {
+    return JSON.stringify([
+      "list",
+      this._config.columnName,
+      this._config.expression
+    ]);
+  }
+
+  updateState(data, column) {
     this._data = data;
+    this._column = column;
 
     if ("choices" in data) {
       var selection = [];
@@ -122,6 +136,23 @@ class ListFacet extends Facet {
     this._update();
   };
 
+  checkInitialHeight() {
+    if (this._elmts) {
+      let innerList = this._elmts.bodyInnerDiv[0];
+      if (!this._initialHeightSet && innerList.offsetHeight !== 0) {
+        let innerHeight = innerList.offsetHeight;
+        let defaultMaxHeight = 17 * 13;
+
+        if (innerHeight > defaultMaxHeight) {
+          this._elmts.bodyDiv.height(defaultMaxHeight + 'px');
+        } else {
+          this._elmts.bodyDiv.height((innerHeight + 1) + 'px');
+        }
+        this._initialHeightSet = true;
+      }
+    }
+  }
+
   _reSortChoices() {
     this._data.choices.sort(this._options.sort === "name" ?
         function(a, b) {
@@ -141,7 +172,7 @@ class ListFacet extends Facet {
 
     this._div.empty().show().html(
       '<div class="facet-title" bind="facetTitle">' +
-        '<div class="grid-layout layout-tightest layout-full"><table><tr>' +
+        '<div class="grid-layout layout-tightest layout-full"><table role="presentation"><tr>' +
           '<td width="1%">' +
             '<a href="javascript:{}" title="'+$.i18n('core-facets/remove-facet')+'" class="facet-title-remove" bind="removeButton">&nbsp;</a>' +
           '</td>' +
@@ -160,7 +191,7 @@ class ListFacet extends Facet {
       '<div class="facet-controls" bind="controlsDiv" style="display:none;">' +
         '<a bind="choiceCountContainer" class="action" href="javascript:{}"></a> ' +
         '<span class="facet-controls-sortControls" bind="sortGroup">'+$.i18n('core-facets/sort-by')+': ' +
-          '<a href="javascript:{}" bind="sortByNameLink">'+$.i18n('core-facets/name')+'</a>' +
+          '<a href="javascript:{}" bind="sortByNameLink">'+$.i18n('core-facets/name')+'</a> ' +
           '<a href="javascript:{}" bind="sortByCountLink">'+$.i18n('core-facets/count')+'</a>' +
         '</span>' +
         '<button bind="clusterLink" class="facet-controls-button button">'+$.i18n('core-facets/cluster')+'</button>' +
@@ -172,7 +203,7 @@ class ListFacet extends Facet {
     this._elmts = DOM.bind(this._div);
 
     this._elmts.titleSpan.text(this._config.name);
-    this._elmts.changeButton.attr("title",$.i18n('core-facets/current-exp')+": " + this._config.expression).click(function() {
+    this._elmts.changeButton.attr("title",$.i18n('core-facets/current-exp')+": " + this._config.expression).on('click',function() {
       self._elmts.expressionDiv.slideToggle(100, function() {
         if (self._elmts.expressionDiv.css("display") != "none") {
           self._editExpression();
@@ -180,21 +211,21 @@ class ListFacet extends Facet {
       });
     });
     
-    this._elmts.expressionDiv.text(this._config.expression).hide().click(function() { self._editExpression(); });
-    this._elmts.removeButton.click(function() { self._remove(); });
-    this._elmts.minimizeButton.click(function() { self._minimize(); });
-    this._elmts.resetButton.click(function() { self._reset(); });
-    this._elmts.invertButton.click(function() { self._invert(); });
+    this._elmts.expressionDiv.text(this._config.expression).hide().on('click',function() { self._editExpression(); });
+    this._elmts.removeButton.on('click',function() { self._remove(); });
+    this._elmts.minimizeButton.on('click',function() { self._minimize(); });
+    this._elmts.resetButton.on('click',function() { self._reset(); });
+    this._elmts.invertButton.on('click',function() { self._invert(); });
 
-    this._elmts.choiceCountContainer.click(function() { self._copyChoices(); });
-    this._elmts.sortByCountLink.click(function() {
+    this._elmts.choiceCountContainer.on('click',function() { self._copyChoices(); });
+    this._elmts.sortByCountLink.on('click',function() {
       if (self._options.sort != "count") {
         self._options.sort = "count";
         self._reSortChoices();
         self._update(true);
       }
     });
-    this._elmts.sortByNameLink.click(function() {
+    this._elmts.sortByNameLink.on('click',function() {
       if (self._options.sort != "name") {
         self._options.sort = "name";
         self._reSortChoices();
@@ -202,7 +233,7 @@ class ListFacet extends Facet {
       }
     });
 
-    this._elmts.clusterLink.click(function() { self._doEdit(); });
+    this._elmts.clusterLink.on('click',function() { self._doEdit(); });
     if (this._config.expression != "value" && this._config.expression != "grel:value") {
       this._elmts.clusterLink.hide();
     }
@@ -222,16 +253,16 @@ class ListFacet extends Facet {
   _copyChoices() {
     var self = this;
     var frame = DialogSystem.createDialog();
-    frame.width("600px");
+    frame.css({"min-width" : "600px"});
 
     var header = $('<div></div>').addClass("dialog-header").text($.i18n('core-facets/facet-choices')).appendTo(frame);
     var body = $('<div></div>').addClass("dialog-body").appendTo(frame);
     var footer = $('<div></div>').addClass("dialog-footer").appendTo(frame);
 
-    body.html('<textarea disabled wrap="off" bind="textarea" style="display: block; width: 100%; height: 400px;" />');
+    body.html('<textarea disabled wrap="off" bind="textarea" style="display: block; width: 100%; height: 400px;"></textarea>');
     var elmts = DOM.bind(body);
 
-    $('<button class="button"></button>').text($.i18n('core-buttons/close')).click(function() {
+    $('<button class="button"></button>').text($.i18n('core-buttons/close')).on('click',function() {
       DialogSystem.dismissUntil(level - 1);
     }).appendTo(footer);
 
@@ -294,7 +325,7 @@ class ListFacet extends Facet {
         .addClass("action")
         .addClass("secondary")
         .appendTo(messageDiv)
-        .click(function() {
+        .on('click',function() {
           self._setChoiceCountLimit(self._data.choiceCount);
         });
         
@@ -362,7 +393,8 @@ class ListFacet extends Facet {
       return temp.text(s).html();
     };
 
-    var renderEdit = this._config.expression === "value";
+    var renderEdit =
+      this._config.expression === "value" || this._config.expression === "grel:value";
     var renderChoice = function(index, choice, customLabel) {
       var label = customLabel || choice.v.l;
       var count = choice.c;
@@ -400,6 +432,8 @@ class ListFacet extends Facet {
     this._elmts.bodyInnerDiv.html(html.join(''));
     this._renderBodyControls();
     this._elmts.bodyInnerDiv[0].scrollTop = scrollTop;
+
+    this.checkInitialHeight();
 
     var getChoice = function(elmt) {
       var index = parseInt(elmt.attr("choiceIndex"),10);
@@ -487,7 +521,7 @@ class ListFacet extends Facet {
     .addClass("action")
     .addClass("secondary")
     .appendTo(bodyControls)
-    .click(function() {
+    .on('click',function() {
       ui.browsingEngine.addFacet(
         "range", 
         {
@@ -513,7 +547,7 @@ class ListFacet extends Facet {
   };
 
   _doEdit() {
-    new ClusteringDialog(this._config.columnName, this._config.expression);
+    new ClusteringDialog(this._column, this._config.expression);
   };
 
   _editChoice(choice, choiceDiv) {
@@ -521,7 +555,7 @@ class ListFacet extends Facet {
 
     var menu = MenuSystem.createMenu().addClass("data-table-cell-editor").width("400px");
     menu.html(
-        '<textarea class="data-table-cell-editor-editor" bind="textarea" />' +
+        '<textarea class="data-table-cell-editor-editor" bind="textarea"></textarea>' +
         '<div id="data-table-cell-editor-actions">' +
           '<div class="data-table-cell-editor-action">' +
             '<button class="button" bind="okButton">'+$.i18n('core-buttons/apply')+'</button>' +
@@ -550,8 +584,6 @@ class ListFacet extends Facet {
     var commit = function() {
       var text = elmts.textarea[0].value;
 
-      MenuSystem.dismissAll();
-
       var edit = { to : text };
       if (choice === self._blankChoice) {
         edit.fromBlank = true;
@@ -576,6 +608,7 @@ class ListFacet extends Facet {
         },
         {
           onDone: function(o) {
+            MenuSystem.dismissAll();
             var selection = [];
             var gotSelection = false;
             for (var i = 0; i < self._selection.length; i++) {
@@ -595,22 +628,24 @@ class ListFacet extends Facet {
       );            
     };
 
-    elmts.okButton.click(commit);
+    elmts.okButton.on('click',commit);
     elmts.textarea
     .text(originalContent)
-    .keydown(function(evt) {
+    .on('keydown',function(evt) {
       if (!evt.shiftKey) {
-        if (evt.keyCode === 13) {
+        if (evt.key === "Enter") {
           commit();
-        } else if (evt.keyCode === 27) {
+        } else if (evt.key === "Escape") {
           MenuSystem.dismissAll();
         }
       }
     })
-    .select()
-    .focus();
+    .trigger('select')
+    .trigger('focus');
 
-    elmts.cancelButton.click(function() {
+    setInitialHeightTextArea(elmts.textarea[0]);
+
+    elmts.cancelButton.on('click',function() {
       MenuSystem.dismissAll();
     });
   };

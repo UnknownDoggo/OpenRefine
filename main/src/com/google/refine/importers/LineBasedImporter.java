@@ -1,5 +1,5 @@
 /*******************************************************************************
- * Copyright (C) 2018, OpenRefine contributors
+ * Copyright (C) 2018, 2022 OpenRefine contributors
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -24,101 +24,107 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.importers;
 
-import java.io.IOException;
-import java.io.LineNumberReader;
+import java.io.BufferedReader;
 import java.io.Reader;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Scanner;
+import java.util.regex.Pattern;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.commons.text.StringEscapeUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.refine.ProjectMetadata;
 import com.google.refine.importing.ImportingJob;
 import com.google.refine.model.Project;
 import com.google.refine.util.JSONUtilities;
 
 public class LineBasedImporter extends TabularImportingParserBase {
+
     static final Logger logger = LoggerFactory.getLogger(LineBasedImporter.class);
-    
+
     public LineBasedImporter() {
         super(false);
     }
-    
+
     @Override
     public ObjectNode createParserUIInitializationData(
             ImportingJob job, List<ObjectNode> fileRecords, String format) {
         ObjectNode options = super.createParserUIInitializationData(job, fileRecords, format);
-        
+
+        JSONUtilities.safePut(options, "separator", "\\r?\\n");
+
         JSONUtilities.safePut(options, "linesPerRow", 1);
         JSONUtilities.safePut(options, "headerLines", 0);
         JSONUtilities.safePut(options, "guessCellValueTypes", false);
-        
+
         return options;
     }
 
     @Override
     public void parseOneFile(
-        Project project,
-        ProjectMetadata metadata,
-        ImportingJob job,
-        String fileSource,
-        Reader reader,
-        int limit,
-        ObjectNode options,
-        List<Exception> exceptions
-    ) {
+            Project project,
+            ProjectMetadata metadata,
+            ImportingJob job,
+            String fileSource,
+            Reader reader,
+            int limit,
+            ObjectNode options,
+            List<Exception> exceptions) {
+        String sepStr = JSONUtilities.getString(options, "separator", "\\r?\\n");
+        if (sepStr == null || "".equals(sepStr)) {
+            sepStr = "\\r?\\n";
+        }
+        sepStr = StringEscapeUtils.unescapeJava(sepStr);
+        Pattern sep = Pattern.compile(sepStr);
+
         final int linesPerRow = JSONUtilities.getInt(options, "linesPerRow", 1);
-        
+
         final List<Object> columnNames;
         if (options.has("columnNames")) {
-            columnNames = new ArrayList<Object>();
-            String[] strings = JSONUtilities.getStringArray(options, "columnNames");
-            for (String s : strings) {
-                columnNames.add(s);
-            }
+            columnNames = new ArrayList<>(Arrays.asList(JSONUtilities.getStringArray(options, "columnNames")));
             JSONUtilities.safePut(options, "headerLines", 1);
         } else {
             columnNames = null;
             JSONUtilities.safePut(options, "headerLines", 0);
         }
-        
-        final LineNumberReader lnReader = new LineNumberReader(reader);
-        
-        try {
-            int skip = JSONUtilities.getInt(options, "ignoreLines", -1);
-            while (skip > 0) {
-                lnReader.readLine();
-                skip--;
-            }
-        } catch (IOException e) {
-            logger.error("Error reading line-based file", e);
+
+        final Scanner lnReader = new Scanner(new BufferedReader(reader));
+        lnReader.useDelimiter(sep);
+
+        int skip = JSONUtilities.getInt(options, "ignoreLines", -1);
+        while (skip > 0) {
+            lnReader.next();
+            skip--;
+        }
+        if (lnReader.ioException() != null) {
+            logger.error("Error reading line-based file", lnReader.ioException());
         }
         JSONUtilities.safePut(options, "ignoreLines", -1);
-        
+
         TableDataReader dataReader = new TableDataReader() {
+
             boolean usedColumnNames = false;
-            
+
             @Override
-            public List<Object> getNextRowOfCells() throws IOException {
+            public List<Object> getNextRowOfCells() {
                 if (columnNames != null && !usedColumnNames) {
                     usedColumnNames = true;
                     return columnNames;
                 } else {
                     List<Object> cells = null;
                     for (int i = 0; i < linesPerRow; i++) {
-                        String line = lnReader.readLine();
-                        if (i == 0) {
-                            if (line == null) {
-                                return null;
-                            } else {
-                                cells = new ArrayList<Object>(linesPerRow);
-                                cells.add(line);
+                        if (lnReader.hasNext()) {
+                            String line = lnReader.next();
+                            if (i == 0) {
+                                cells = new ArrayList<>(linesPerRow);
                             }
-                        } else if (line != null) {
                             cells.add(line);
                         } else {
                             break;
@@ -128,7 +134,7 @@ public class LineBasedImporter extends TabularImportingParserBase {
                 }
             }
         };
-        
+
         TabularImportingParserBase.readTable(project, job, dataReader, limit, options, exceptions);
     }
 }

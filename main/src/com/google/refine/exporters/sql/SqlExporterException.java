@@ -24,10 +24,12 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.exporters.sql;
 
+import com.google.refine.exporters.ExporterException;
 
-public class SqlExporterException extends RuntimeException {
+public class SqlExporterException extends ExporterException {
 
     /**
      * 
@@ -36,7 +38,6 @@ public class SqlExporterException extends RuntimeException {
 
     public SqlExporterException(String message) {
         super(message);
-        // TODO Auto-generated constructor stub
     }
 
 }

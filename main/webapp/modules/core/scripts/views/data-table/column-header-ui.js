@@ -31,11 +31,12 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
  */
 
-function DataTableColumnHeaderUI(dataTableView, column, columnIndex, td) {
+function DataTableColumnHeaderUI(dataTableView, column, columnIndex, td, col) {
   this._dataTableView = dataTableView;
   this._column = column;
   this._columnIndex = columnIndex;
   this._td = td;
+  this._col = col;
 
   this._render();
 }
@@ -66,9 +67,37 @@ DataTableColumnHeaderUI.prototype._render = function() {
   var elmts = DOM.bind(td);
 
   elmts.nameContainer.text(this._column.name);
-  elmts.dropdownMenu.click(function() {
+  elmts.dropdownMenu.on('click',function() {
     self._createMenuForColumnHeader(this);
   });
+
+  var serviceUrl = null;
+  if (this._column.reconConfig) {
+   serviceUrl = this._column.reconConfig.service;
+  }
+  if (serviceUrl) {
+    try {
+      var service = null;
+      var serviceLogo = null;
+      if (new URL(serviceUrl)) {
+        service = ReconciliationManager.getServiceFromUrl(serviceUrl);
+      }
+      if (service) {
+        serviceLogo = service.logo;
+      }
+
+      var img = $("<img>");
+      if (serviceLogo) {
+        var imageUrl = new URL(serviceLogo).toString(); // throws an exception if the format is invalid
+        img.attr("src", imageUrl);
+        img.attr("title", service.name);
+        img.addClass("serviceLogo")
+        img.appendTo(elmts.serviceLogoContainer.show());
+      }
+    } catch {
+      console.log("Invalid logo URL supplied by service "+serviceUrl);
+    }
+  }
 
   if ("reconStats" in this._column) {
     var stats = this._column.reconStats;
@@ -92,6 +121,18 @@ DataTableColumnHeaderUI.prototype._render = function() {
       .addClass("column-header-recon-stats-matched")
       .width(Math.round(stats.matchedTopics * 100 / stats.nonBlanks) + "%")
       .appendTo(whole);
+    }
+  }
+  if("sourceReconConfig" in this._column) {
+    if(this._column.sourceReconConfig.service){
+     var service = ReconciliationManager.getServiceFromUrl(this._column.sourceReconConfig.service);
+     var serviceName;
+     if(service) {
+       serviceName=service.name;
+     }
+     if(serviceName){
+      elmts.nameContainer.attr("title",$.i18n('core-views/data-extended-from',service.name));
+      }
     }
   }
 };
@@ -127,7 +168,7 @@ DataTableColumnHeaderUI.prototype._createMenuForColumnHeader = function(elmt) {
       this._dataTableView._getSortingCriterionForColumn(this._column.name) === null ?
         {
           id: "core/sort",
-          "label": $.i18n('core-views/sort')+"...",
+          "label": $.i18n('core-views/sort'),
           "click": function() {
             self._showSortingCriterion(null, self._dataTableView._getSortingCriteriaCount() > 0);
           }
@@ -180,6 +221,45 @@ DataTableColumnHeaderUI.prototype._createMenuForColumnHeader = function(elmt) {
             }
             self._dataTableView.render();
           }
+        },
+        {
+          label: $.i18n('core-views/expand-all'),
+          /**
+           * This function expands all the columns in the project
+           */
+          // CS427 Issue Link: https://github.com/OpenRefine/OpenRefine/issues/4067
+          click: function() {
+            self._dataTableView._collapsedColumnNames = [];
+            self._dataTableView.render();
+          }
+        },
+        {
+          label: $.i18n('core-views/expand-left'),
+          /**
+           * This function expands the columns to the left of the selected column
+           */
+          // CS427 Issue Link: https://github.com/OpenRefine/OpenRefine/issues/4067
+          click: function() {
+            //by deleting these entries from collapsedColumnNames, they won't render on the dataTableView
+            for (var i = 0; i < self._columnIndex; i++) {
+              delete self._dataTableView._collapsedColumnNames[theProject.columnModel.columns[i].name];
+            }
+            self._dataTableView.render();
+          }
+        },
+        {
+          label: $.i18n('core-views/expand-right'),
+          /**
+           * This function expands the columns to the right of the selected column
+           */
+          // CS427 Issue Link: https://github.com/OpenRefine/OpenRefine/issues/4067
+          click: function() {
+            //by deleting these entries from collapsedColumnNames, they won't render on the dataTableView
+            for (var i = self._columnIndex + 1; i < theProject.columnModel.columns.length; i++) {
+              delete self._dataTableView._collapsedColumnNames[theProject.columnModel.columns[i].name];
+            }
+            self._dataTableView.render();
+          }
         }
       ]
     },
@@ -208,7 +288,7 @@ DataTableColumnHeaderUI.prototype.createSortingMenu = function() {
 
   var items = [
     {
-      "label": $.i18n('core-views/sort')+"...",
+      "label": $.i18n('core-views/sort'),
       "click": function() {
         self._showSortingCriterion(criterion, hasOtherCriteria);
       }
@@ -287,7 +367,7 @@ DataTableColumnHeaderUI.prototype._showSortingCriterion = function(criterion, ha
   };
   elmts.valueTypeOptions
   .find("input[type='radio']")
-  .change(function() {
+  .on('change',function() {
     setValueType(this.value);
   });
 
@@ -331,8 +411,8 @@ DataTableColumnHeaderUI.prototype._showSortingCriterion = function(criterion, ha
 
   setValueType(criterion.valueType); 
 
-  elmts.cancelButton.click(dismiss);
-  elmts.okButton.click(function() {
+  elmts.cancelButton.on('click',dismiss);
+  elmts.okButton.on('click',function() {
     var criterion2 = {
         column: self._column.name,
         valueType: elmts.valueTypeOptions.find("input[type='radio']:checked")[0].value,

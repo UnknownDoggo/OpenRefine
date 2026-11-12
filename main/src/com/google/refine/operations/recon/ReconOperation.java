@@ -36,16 +36,19 @@ package com.google.refine.operations.recon;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.browsing.FilteredRows;
@@ -53,8 +56,10 @@ import com.google.refine.browsing.RowVisitor;
 import com.google.refine.expr.ExpressionUtils;
 import com.google.refine.history.Change;
 import com.google.refine.history.HistoryEntry;
+import com.google.refine.messages.OpenRefineMessage;
 import com.google.refine.model.Cell;
 import com.google.refine.model.Column;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Recon;
 import com.google.refine.model.Row;
@@ -69,20 +74,17 @@ import com.google.refine.process.Process;
 import com.google.refine.util.ParsingUtilities;
 
 public class ReconOperation extends EngineDependentOperation {
+
     final static Logger logger = LoggerFactory.getLogger("recon-operation");
-    
-    final protected String      _columnName;
+
+    final protected String _columnName;
     final protected ReconConfig _reconConfig;
-    
+
     @JsonCreator
     public ReconOperation(
-        @JsonProperty("engineConfig")
-        EngineConfig engineConfig, 
-        @JsonProperty("columnName")
-        String columnName, 
-        @JsonProperty("config")
-        ReconConfig reconConfig
-    ) {
+            @JsonProperty("engineConfig") EngineConfig engineConfig,
+            @JsonProperty("columnName") String columnName,
+            @JsonProperty("config") ReconConfig reconConfig) {
         super(engineConfig);
         _columnName = columnName;
         _reconConfig = reconConfig;
@@ -91,96 +93,121 @@ public class ReconOperation extends EngineDependentOperation {
     @Override
     public Process createProcess(Project project, Properties options) throws Exception {
         return new ReconProcess(
-            project, 
-            getEngineConfig(),
-            getBriefDescription(null)
-        );
+                project,
+                getEngineConfig(),
+                getBriefDescription(null));
     }
-    
+
     @Override
     protected String getBriefDescription(Project project) {
         return _reconConfig.getBriefDescription(project, _columnName);
     }
-    
+
     @JsonProperty("config")
     public ReconConfig getReconConfig() {
         return _reconConfig;
     }
-    
+
     @JsonProperty("columnName")
     public String getColumnName() {
         return _columnName;
     }
 
+    @Override
+    public Optional<Set<String>> getColumnDependenciesWithoutEngine() {
+        Optional<Set<String>> reconDeps = _reconConfig.getColumnDependencies();
+        if (reconDeps.isEmpty()) {
+            return Optional.empty();
+        }
+        Set<String> dependencies = new HashSet<>(reconDeps.get());
+        dependencies.add(_columnName);
+        return Optional.of(dependencies);
+    }
+
+    @Override
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.modifySingleColumn(_columnName));
+    }
+
+    @Override
+    public ReconOperation renameColumns(Map<String, String> newColumnNames) {
+        return new ReconOperation(
+                _engineConfig.renameColumnDependencies(newColumnNames),
+                newColumnNames.getOrDefault(_columnName, _columnName),
+                _reconConfig.renameColumns(newColumnNames));
+    }
+
     static protected class ReconEntry {
+
         final public int rowIndex;
         final public Cell cell;
-        
+
         public ReconEntry(int rowIndex, Cell cell) {
             this.rowIndex = rowIndex;
             this.cell = cell;
         }
     }
+
     static protected class JobGroup {
+
         final public ReconJob job;
         final public List<ReconEntry> entries = new ArrayList<ReconEntry>();
         public int trials = 0;
-        
+
         public JobGroup(ReconJob job) {
             this.job = job;
         }
     }
-    
+
     public class ReconProcess extends LongRunningProcess implements Runnable {
-        final protected Project      _project;
+
+        final protected Project _project;
         final protected EngineConfig _engineConfig;
-        final protected long         _historyEntryID;
-        protected List<ReconEntry>   _entries;
-        protected int                _cellIndex;
-        
-        protected final String _addJudgmentFacetJson =
-                "{\n" + 
-                "  \"action\" : \"createFacet\",\n" + 
-                "  \"facetConfig\" : {\n" + 
-                "  \"columnName\" : \"" + _columnName + "\",\n" + 
-                "  \"expression\" : \"forNonBlank(cell.recon.judgment, v, v, if(isNonBlank(value), \\\"(unreconciled)\\\", \\\"(blank)\\\"))\",\n" + 
-                "    \"name\" : \"" + _columnName + ": judgment\"\n" + 
-                "    },\n" + 
-                "    \"facetOptions\" : {\n" + 
-                "      \"scroll\" : false\n" + 
-                "    },\n" + 
-                "    \"facetType\" : \"list\"\n" + 
+        final protected long _historyEntryID;
+        protected List<ReconEntry> _entries;
+        protected int _cellIndex;
+
+        protected final String _addJudgmentFacetJson = "{\n" +
+                "  \"action\" : \"createFacet\",\n" +
+                "  \"facetConfig\" : {\n" +
+                "  \"columnName\" : \"" + _columnName + "\",\n" +
+                "  \"expression\" : \"forNonBlank(cell.recon.judgment, v, v, if(isNonBlank(value), \\\"(unreconciled)\\\", \\\"(blank)\\\"))\",\n"
+                +
+                "    \"name\" : \"" + _columnName + ": " + OpenRefineMessage.recon_operation_judgement_facet_name() + "\"\n" +
+                "    },\n" +
+                "    \"facetOptions\" : {\n" +
+                "      \"scroll\" : true\n" +
+                "    },\n" +
+                "    \"facetType\" : \"list\"\n" +
                 " }";
-        protected final String _addScoreFacetJson = 
-                "{\n" + 
-                "  \"action\" : \"createFacet\",\n" + 
-                "  \"facetConfig\" : {\n" + 
-                "    \"columnName\" : \"" + _columnName + "\",\n" + 
-                "    \"expression\" : \"cell.recon.best.score\",\n" + 
-                "    \"mode\" : \"range\",\n" + 
-                "    \"name\" : \"" + _columnName + ": best candidate's score\"\n" + 
-                "         },\n" + 
-                "         \"facetType\" : \"range\"\n" + 
+        protected final String _addScoreFacetJson = "{\n" +
+                "  \"action\" : \"createFacet\",\n" +
+                "  \"facetConfig\" : {\n" +
+                "    \"columnName\" : \"" + _columnName + "\",\n" +
+                "    \"expression\" : \"cell.recon.best.score\",\n" +
+                "    \"mode\" : \"range\",\n" +
+                "    \"name\" : \"" + _columnName + ": " + OpenRefineMessage.recon_operation_score_facet_name() + "\"\n" +
+                "         },\n" +
+                "         \"facetType\" : \"range\"\n" +
                 "}";
         protected JsonNode _addJudgmentFacet, _addScoreFacet;
-        
+
         public ReconProcess(
-            Project project, 
-            EngineConfig engineConfig, 
-            String description
-        ) {
+                Project project,
+                EngineConfig engineConfig,
+                String description) {
             super(description);
             _project = project;
             _engineConfig = engineConfig;
             _historyEntryID = HistoryEntry.allocateID();
-            try {               
+            try {
                 _addJudgmentFacet = ParsingUtilities.mapper.readValue(_addJudgmentFacetJson, JsonNode.class);
                 _addScoreFacet = ParsingUtilities.mapper.readValue(_addScoreFacetJson, JsonNode.class);
             } catch (IOException e) {
                 e.printStackTrace();
             }
         }
-        
+
         @JsonProperty("onDone")
         public List<JsonNode> onDoneActions() {
             List<JsonNode> onDone = new ArrayList<>();
@@ -190,26 +217,27 @@ public class ReconOperation extends EngineDependentOperation {
             }
             return onDone;
         }
-        
+
         @Override
         protected Runnable getRunnable() {
             return this;
         }
-        
+
         protected void populateEntries() throws Exception {
             Engine engine = new Engine(_project);
             engine.initializeFromConfig(_engineConfig);
-            
+
             Column column = _project.columnModel.getColumnByName(_columnName);
             if (column == null) {
                 throw new Exception("No column named " + _columnName);
             }
-            
+
             _entries = new ArrayList<ReconEntry>(_project.rows.size());
             _cellIndex = column.getCellIndex();
-            
+
             FilteredRows filteredRows = engine.getAllFilteredRows();
             filteredRows.accept(_project, new RowVisitor() {
+
                 @Override
                 public void start(Project project) {
                     // nothing to do
@@ -219,7 +247,7 @@ public class ReconOperation extends EngineDependentOperation {
                 public void end(Project project) {
                     // nothing to do
                 }
-                
+
                 @Override
                 public boolean visit(Project project, int rowIndex, Row row) {
                     if (_cellIndex < row.cells.size()) {
@@ -232,7 +260,7 @@ public class ReconOperation extends EngineDependentOperation {
                 }
             });
         }
-        
+
         @Override
         public void run() {
             try {
@@ -241,18 +269,17 @@ public class ReconOperation extends EngineDependentOperation {
                 // TODO : Not sure what to do here?
                 e2.printStackTrace();
             }
-            
+
             Map<String, JobGroup> jobKeyToGroup = new HashMap<String, JobGroup>();
-            
+
             for (ReconEntry entry : _entries) {
                 ReconJob job = _reconConfig.createJob(
-                    _project, 
-                    entry.rowIndex, 
-                    _project.rows.get(entry.rowIndex), 
-                    _columnName, 
-                    entry.cell
-                );
-                
+                        _project,
+                        entry.rowIndex,
+                        _project.rows.get(entry.rowIndex),
+                        _columnName,
+                        entry.cell);
+
                 String key = job.getStringKey();
                 JobGroup group = jobKeyToGroup.get(key);
                 if (group == null) {
@@ -261,67 +288,60 @@ public class ReconOperation extends EngineDependentOperation {
                 }
                 group.entries.add(entry);
             }
-            
-            int batchSize = _reconConfig.getBatchSize();
+
+            int batchSize = _reconConfig.getBatchSize(_project.rows.size());
             int done = 0;
-            
+
             List<CellChange> cellChanges = new ArrayList<CellChange>(_entries.size());
             List<JobGroup> groups = new ArrayList<JobGroup>(jobKeyToGroup.values());
-            
+
             List<ReconJob> jobs = new ArrayList<ReconJob>(batchSize);
             Map<ReconJob, JobGroup> jobToGroup = new HashMap<ReconJob, ReconOperation.JobGroup>();
-            
+
             for (int i = 0; i < groups.size(); /* don't increment here */) {
                 while (jobs.size() < batchSize && i < groups.size()) {
                     JobGroup group = groups.get(i++);
-                    
+
                     jobs.add(group.job);
                     jobToGroup.put(group.job, group);
                 }
-                
+
                 List<Recon> recons = _reconConfig.batchRecon(jobs, _historyEntryID);
                 for (int j = jobs.size() - 1; j >= 0; j--) {
                     ReconJob job = jobs.get(j);
-                    Recon    recon = j < recons.size() ? recons.get(j) : null;
+                    Recon recon = j < recons.size() ? recons.get(j) : null;
                     JobGroup group = jobToGroup.get(job);
                     List<ReconEntry> entries = group.entries;
-
-                    /*
-                     * TODO: Not sure what this retry is meant to handle, but it's currently
-                     * non-functional due the code at the end of StandardReconConfig#batchRecon()
-                     * which tops up any missing entries.
-                     */
-                    if (recon == null) {
-                        group.trials++;
-                        if (group.trials < 3) {
-                            logger.warn("Re-trying job including cell containing: " + entries.get(0).cell.value);
-                            continue; // try again next time
-                        }
-                        String msg = "Failed after 3 trials for job including cell containing: " + entries.get(0).cell.value;
-                        logger.warn(msg);
-                        recon = _reconConfig.createNewRecon(_historyEntryID);
-                    }
 
                     jobToGroup.remove(job);
                     jobs.remove(j);
                     done++;
 
-                    recon.judgmentBatchSize = entries.size();
-                    
+                    if (recon != null) {
+                        recon.judgmentBatchSize = entries.size();
+                    }
+
                     for (ReconEntry entry : entries) {
+                        if (recon == null) {
+                            // TODO add EvalError instead? That is not so convenient
+                            // for users because they would lose the cell contents.
+                            // Better leave the cell unreconciled so they can be reconciled again later.
+                            Cell oldCell = entry.cell;
+                            logger.warn("We have a null recon here" + " " + oldCell + " " + entry.rowIndex);
+                            continue;
+                        }
                         Cell oldCell = entry.cell;
                         Cell newCell = new Cell(oldCell.value, recon);
-                        
+
                         CellChange cellChange = new CellChange(
-                            entry.rowIndex, 
-                            _cellIndex, 
-                            oldCell, 
-                            newCell
-                        );
+                                entry.rowIndex,
+                                _cellIndex,
+                                oldCell,
+                                newCell);
                         cellChanges.add(cellChange);
                     }
                 }
-                
+
                 _progress = done * 100 / groups.size();
                 try {
                     Thread.sleep(50);
@@ -331,24 +351,22 @@ public class ReconOperation extends EngineDependentOperation {
                     }
                 }
             }
-            
+
             // TODO: Option to keep partial results after cancellation?
             if (!_canceled) {
                 Change reconChange = new ReconChange(
-                    cellChanges, 
-                    _columnName, 
-                    _reconConfig,
-                    null
-                );
-                
+                        cellChanges,
+                        _columnName,
+                        _reconConfig,
+                        null);
+
                 HistoryEntry historyEntry = new HistoryEntry(
-                    _historyEntryID,
-                    _project, 
-                    _description, 
-                    ReconOperation.this, 
-                    reconChange
-                );
-                
+                        _historyEntryID,
+                        _project,
+                        _description,
+                        ReconOperation.this,
+                        reconChange);
+
                 _project.history.addEntry(historyEntry);
                 _project.processManager.onDoneProcess(this);
             }

@@ -34,16 +34,19 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 package com.google.refine.operations.recon;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
-
-import org.apache.commons.lang3.StringUtils;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.commons.lang3.StringUtils;
+
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.browsing.FilteredRows;
@@ -51,6 +54,7 @@ import com.google.refine.browsing.RowVisitor;
 import com.google.refine.history.HistoryEntry;
 import com.google.refine.model.Cell;
 import com.google.refine.model.Column;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Recon;
 import com.google.refine.model.Recon.Judgment;
@@ -58,58 +62,80 @@ import com.google.refine.model.Row;
 import com.google.refine.model.changes.CellChange;
 import com.google.refine.model.changes.MassChange;
 import com.google.refine.operations.EngineDependentOperation;
+import com.google.refine.operations.OperationDescription;
 
 public class ReconCopyAcrossColumnsOperation extends EngineDependentOperation {
-    final protected String   _fromColumnName;
+
+    final protected String _fromColumnName;
     final protected String[] _toColumnNames;
     final protected String[] _judgments;
-    final protected boolean  _applyToJudgedCells;
-    
+    final protected boolean _applyToJudgedCells;
+
     @JsonCreator
     public ReconCopyAcrossColumnsOperation(
-        @JsonProperty("engineConfig")
-        EngineConfig engineConfig,
-        @JsonProperty("fromColumnName")
-        String fromColumnName,
-        @JsonProperty("toColumnNames")
-        String[] toColumnNames,
-        @JsonProperty("judgments")
-        String[] judgments,
-        @JsonProperty("applyToJudgedCells")
-        boolean applyToJudgedCells) {
+            @JsonProperty("engineConfig") EngineConfig engineConfig,
+            @JsonProperty("fromColumnName") String fromColumnName,
+            @JsonProperty("toColumnNames") String[] toColumnNames,
+            @JsonProperty("judgments") String[] judgments,
+            @JsonProperty("applyToJudgedCells") boolean applyToJudgedCells) {
         super(engineConfig);
         _fromColumnName = fromColumnName;
         _toColumnNames = toColumnNames;
         _judgments = judgments;
         _applyToJudgedCells = applyToJudgedCells;
     }
-    
+
     @JsonProperty("fromColumnName")
     public String getFromColumnName() {
         return _fromColumnName;
     }
-    
+
     @JsonProperty("toColumnNames")
     public String[] getToColumnNames() {
         return _toColumnNames;
     }
-    
+
     @JsonProperty("judgments")
     public String[] getJudgments() {
         return _judgments;
     }
-    
+
     @JsonProperty("applyToJudgedCells")
     public boolean getApplyToJudgedCells() {
         return _applyToJudgedCells;
     }
 
     @Override
+    public Optional<Set<String>> getColumnDependenciesWithoutEngine() {
+        Set<String> columnNames = new HashSet<>(Set.of(_toColumnNames));
+        columnNames.add(_fromColumnName);
+        return Optional.of(columnNames);
+    }
+
+    @Override
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(new ColumnsDiff(List.of(), Set.of(), Set.of(_toColumnNames)));
+    }
+
+    @Override
+    public ReconCopyAcrossColumnsOperation renameColumns(Map<String, String> newColumnNames) {
+        List<String> translatedToColumnNames = Arrays.asList(_toColumnNames).stream()
+                .map(name -> newColumnNames.getOrDefault(name, name))
+                .collect(Collectors.toList());
+        return new ReconCopyAcrossColumnsOperation(
+                _engineConfig.renameColumnDependencies(newColumnNames),
+                newColumnNames.getOrDefault(_fromColumnName, _fromColumnName),
+                translatedToColumnNames.toArray(new String[translatedToColumnNames.size()]),
+                _judgments,
+                _applyToJudgedCells);
+    }
+
+    @Override
     protected HistoryEntry createHistoryEntry(final Project project, final long historyEntryID) throws Exception {
         Engine engine = createEngine(project);
-        
+
         final Column fromColumn = project.columnModel.getColumnByName(_fromColumnName);
-        
+
         final List<Column> toColumns = new ArrayList<Column>(_toColumnNames.length);
         for (String c : _toColumnNames) {
             Column toColumn = project.columnModel.getColumnByName(c);
@@ -117,30 +143,31 @@ public class ReconCopyAcrossColumnsOperation extends EngineDependentOperation {
                 toColumns.add(toColumn);
             }
         }
-        
+
         final Set<Recon.Judgment> judgments = new HashSet<Recon.Judgment>(_judgments.length);
         for (String j : _judgments) {
             judgments.add(Recon.stringToJudgment(j));
         }
-        
+
         final List<CellChange> cellChanges = new ArrayList<CellChange>(project.rows.size());
-        
+
         if (fromColumn != null && toColumns.size() > 0) {
             final Map<Object, Recon> cellValueToRecon = new HashMap<Object, Recon>();
-            
+
             FilteredRows filteredRows = engine.getAllFilteredRows();
             try {
                 filteredRows.accept(project, new RowVisitor() {
+
                     @Override
                     public void start(Project project) {
                         // nothing to do
                     }
-                    
+
                     @Override
                     public void end(Project project) {
                         // nothing to do
                     }
-                    
+
                     @Override
                     public boolean visit(Project project, int rowIndex, Row row) {
                         Cell cell = row.getCell(fromColumn.getCellIndex());
@@ -152,18 +179,19 @@ public class ReconCopyAcrossColumnsOperation extends EngineDependentOperation {
                         return false;
                     }
                 });
-                
+
                 filteredRows.accept(project, new RowVisitor() {
+
                     @Override
                     public void start(Project project) {
                         // nothing to do
                     }
-                    
+
                     @Override
                     public void end(Project project) {
                         // nothing to do
                     }
-                    
+
                     @Override
                     public boolean visit(Project project, int rowIndex, Row row) {
                         for (Column column : toColumns) {
@@ -172,7 +200,7 @@ public class ReconCopyAcrossColumnsOperation extends EngineDependentOperation {
                             if (cell != null && cell.value != null) {
                                 Recon reconToCopy = cellValueToRecon.get(cell.value);
                                 boolean judged = cell.recon != null && cell.recon.judgment != Judgment.None;
-                                
+
                                 if (reconToCopy != null && (!judged || _applyToJudgedCells)) {
                                     Cell newCell = new Cell(cell.value, reconToCopy);
                                     CellChange cellChange = new CellChange(rowIndex, cellIndex, cell, newCell);
@@ -187,17 +215,15 @@ public class ReconCopyAcrossColumnsOperation extends EngineDependentOperation {
                 e.printStackTrace();
             }
         }
-        
-        String description = "Copy " + cellChanges.size() + " recon judgments from column " +
-            _fromColumnName + " to " + StringUtils.join(_toColumnNames);
-        
+
+        String description = OperationDescription.recon_copy_across_columns_desc(cellChanges.size(), _fromColumnName,
+                StringUtils.join(_toColumnNames));
         return new HistoryEntry(
-            historyEntryID, project, description, this, new MassChange(cellChanges, false));
+                historyEntryID, project, description, this, new MassChange(cellChanges, false));
     }
-    
+
     @Override
     protected String getBriefDescription(Project project) {
-        return "Copy recon judgments from column " +
-            _fromColumnName + " to " + StringUtils.join(_toColumnNames);
+        return OperationDescription.recon_copy_across_columns_brief(_fromColumnName, StringUtils.join(_toColumnNames, ", "));
     }
 }

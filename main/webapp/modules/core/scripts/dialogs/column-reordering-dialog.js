@@ -39,13 +39,17 @@ ColumnReorderingDialog.prototype._createDialog = function() {
     var self = this;
     var dialog = $(DOM.loadHTML("core", "scripts/dialogs/column-reordering-dialog.html"));
     this._elmts = DOM.bind(dialog);
-    
-    this._elmts.cancelButton.click(function() { self._dismiss(); });
-    this._elmts.okButton.click(function() { self._commit(); });
+
+    this._elmts.removeAllButton.on('click',function() { self._removeAll(); });
+    this._elmts.addAllButton.on('click',function() { self._addAll() });
+    this._elmts.cancelButton.on('click',function() { self._dismiss(); });
+    this._elmts.okButton.on('click',function() { self._commit(); });
     
     this._elmts.dialogHeader.html($.i18n('core-dialogs/reorder-column'));
     this._elmts.or_dialog_dragCol.html($.i18n('core-dialogs/drag-column'));
     this._elmts.or_dialog_dropCol.html($.i18n('core-dialogs/drop-column'));
+    this._elmts.addAllButton.html($.i18n('core-dialogs/add-all'));
+    this._elmts.removeAllButton.html($.i18n('core-dialogs/remove-all'));
     this._elmts.okButton.html($.i18n('core-buttons/ok'));
     this._elmts.cancelButton.html($.i18n('core-buttons/cancel'));
     
@@ -69,20 +73,55 @@ ColumnReorderingDialog.prototype._createDialog = function() {
         .disableSelection();
 };
 
+ColumnReorderingDialog.prototype._removeAll = function() {
+    this._elmts.columnContainer.children().appendTo(this._elmts.trashContainer);
+};
+
+ColumnReorderingDialog.prototype._addAll = function() {
+    this._elmts.trashContainer.children().appendTo(this._elmts.columnContainer);
+};
+
 ColumnReorderingDialog.prototype._dismiss = function() {
     DialogSystem.dismissUntil(this._level - 1);
 };
 
 ColumnReorderingDialog.prototype._commit = function() {
+    var self = this;
     var columnNames = this._elmts.columnContainer.find('div').map(function() { return this.getAttribute("column"); }).get();
+    var deletedColumnNames = this._elmts.trashContainer.find('div').map(function() { return this.getAttribute("column"); }).get();
+    var retainedColumnNamesInOriginalOrder = theProject.columnModel.columns
+        .map(column => column.name)
+        .filter(columnName => columnNames.indexOf(columnName) != -1);
     
-    Refine.postCoreProcess(
-        "reorder-columns",
-        null,
-        { "columnNames" : JSON.stringify(columnNames) }, 
-        { modelsChanged: true },
-        { includeEngine: false }
-    );
+    var isPureReorder = deletedColumnNames.length === 0;
+    var isPureDelete = JSON.stringify(retainedColumnNamesInOriginalOrder) === JSON.stringify(columnNames);
     
-    this._dismiss();
+    if (isPureDelete) {
+        var recordIdsPreserved = columnNames.length > 0 && columnNames[0] === retainedColumnNamesInOriginalOrder[0];
+        Refine.postCoreProcess(
+            "apply-operations",
+            null,
+            { "operations": JSON.stringify([{
+                op: 'core/column-multi-removal',
+                columnNames: deletedColumnNames
+              }])
+            },
+            { modelsChanged: true, rowIdsPreserved: true, recordIdsPreserved },
+            { 
+              includeEngine: false,
+              onDone: function() { self._dismiss(); }
+            }
+        ); 
+    } else {
+        Refine.postCoreProcess(
+            "reorder-columns",
+            null,
+            { "columnNames" : JSON.stringify(columnNames), isPureReorder }, 
+            { modelsChanged: true, rowIdsPreserved: true }, // TODO could add recordIdsPreserved: true if the record key column did not change
+            { 
+              includeEngine: false,
+              onDone: function() { self._dismiss(); }
+            }
+        );
+    }
 };

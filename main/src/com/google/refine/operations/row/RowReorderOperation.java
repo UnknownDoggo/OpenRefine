@@ -33,52 +33,73 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.operations.row;
 
- import java.util.ArrayList;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.Engine.Mode;
 import com.google.refine.browsing.RecordVisitor;
 import com.google.refine.browsing.RowVisitor;
 import com.google.refine.history.HistoryEntry;
 import com.google.refine.model.AbstractOperation;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Record;
 import com.google.refine.model.Row;
 import com.google.refine.model.changes.RowReorderChange;
+import com.google.refine.operations.OperationDescription;
 import com.google.refine.sorting.SortingConfig;
 import com.google.refine.sorting.SortingRecordVisitor;
 import com.google.refine.sorting.SortingRowVisitor;
 
 public class RowReorderOperation extends AbstractOperation {
+
     final protected Mode _mode;
     final protected SortingConfig _sorting;
 
     @JsonCreator
     public RowReorderOperation(
-            @JsonProperty("mode")
-            Mode mode,
-            @JsonProperty("sorting")
-            SortingConfig sorting) {
+            @JsonProperty("mode") Mode mode,
+            @JsonProperty("sorting") SortingConfig sorting) {
         _mode = mode;
         _sorting = sorting;
     }
-    
+
     @JsonProperty("mode")
     public Mode getMode() {
         return _mode;
     }
-    
+
     @JsonProperty("sorting")
     public SortingConfig getSortingConfig() {
         return _sorting;
     }
 
     @Override
+    public Optional<Set<String>> getColumnDependencies() {
+        return Optional.of(Set.of());
+    }
+
+    @JsonIgnore
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.empty());
+    }
+
+    @Override
+    public RowReorderOperation renameColumns(Map<String, String> newColumnNames) {
+        return new RowReorderOperation(_mode, _sorting.renameColumns(newColumnNames));
+    }
+
+    @Override
     protected String getBriefDescription(Project project) {
-        return "Reorder rows";
+        return OperationDescription.row_reorder_brief();
     }
 
     @Override
@@ -115,14 +136,14 @@ public class RowReorderOperation extends AbstractOperation {
 
         return new HistoryEntry(
                 historyEntryID,
-                project, 
-                "Reorder rows", 
-                this, 
-                new RowReorderChange(rowIndices)
-        );
+                project,
+                getBriefDescription(null),
+                this,
+                new RowReorderChange(rowIndices));
     }
 
     static protected class IndexingVisitor implements RowVisitor, RecordVisitor {
+
         List<Integer> _indices;
 
         IndexingVisitor(List<Integer> indices) {

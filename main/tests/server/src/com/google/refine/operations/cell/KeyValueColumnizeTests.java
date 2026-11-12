@@ -33,50 +33,46 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.operations.cell;
 
-import static org.mockito.Mockito.mock;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertThrows;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.StringReader;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Properties;
+import java.io.Serializable;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
+import com.fasterxml.jackson.databind.node.TextNode;
 import org.slf4j.LoggerFactory;
-import org.testng.Assert;
 import org.testng.annotations.AfterMethod;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Test;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.refine.ProjectManager;
 import com.google.refine.ProjectMetadata;
 import com.google.refine.RefineServlet;
 import com.google.refine.RefineServletStub;
 import com.google.refine.RefineTest;
-import com.google.refine.importers.SeparatorBasedImporter;
 import com.google.refine.importing.ImportingJob;
 import com.google.refine.importing.ImportingManager;
 import com.google.refine.io.FileProjectManager;
 import com.google.refine.model.AbstractOperation;
 import com.google.refine.model.ModelException;
 import com.google.refine.model.Project;
+import com.google.refine.operations.OperationDescription;
 import com.google.refine.operations.OperationRegistry;
-import com.google.refine.process.Process;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
-
 public class KeyValueColumnizeTests extends RefineTest {
+
     // dependencies
     private RefineServlet servlet;
     private Project project;
     private ProjectMetadata pm;
-    private ObjectNode options;
     private ImportingJob job;
-    private SeparatorBasedImporter importer;
-
 
     @Override
     @BeforeTest
@@ -86,103 +82,131 @@ public class KeyValueColumnizeTests extends RefineTest {
 
     @BeforeMethod
     public void SetUp() throws IOException, ModelException {
-	servlet = new RefineServletStub();
+        servlet = new RefineServletStub();
         File dir = TestUtils.createTempDirectory("openrefine-test-workspace-dir");
         FileProjectManager.initialize(dir);
         project = new Project();
         pm = new ProjectMetadata();
         pm.setName("KeyValueColumnize test");
         ProjectManager.singleton.registerProject(project, pm);
-        options = mock(ObjectNode.class);
         OperationRegistry.registerOperation(getCoreModule(), "key-value-columnize", KeyValueColumnizeOperation.class);
-
-	ImportingManager.initialize(servlet);
+        ImportingManager.initialize(servlet);
         job = ImportingManager.createJob();
-	importer = new SeparatorBasedImporter(); 
     }
 
     @AfterMethod
     public void TearDown() {
-	ImportingManager.disposeJob(job.id);
-	ProjectManager.singleton.deleteProject(project.id);
-	job = null;
+        ImportingManager.disposeJob(job.id);
+        ProjectManager.singleton.deleteProject(project.id);
+        job = null;
         project = null;
-	pm = null;
-        options = null;
+        pm = null;
     }
-    
+
     @Test
     public void serializeKeyValueColumnizeOperation() throws Exception {
         String json = "{\"op\":\"core/key-value-columnize\","
-                + "\"description\":\"Columnize by key column key column and value column value column\","
+                + "\"description\":"
+                + new TextNode(OperationDescription.cell_key_value_columnize_brief("key column", "value column")).toString() + ","
                 + "\"keyColumnName\":\"key column\","
                 + "\"valueColumnName\":\"value column\","
                 + "\"noteColumnName\":null}";
         TestUtils.isSerializedTo(ParsingUtilities.mapper.readValue(json, KeyValueColumnizeOperation.class), json);
 
         String jsonFull = "{\"op\":\"core/key-value-columnize\","
-                + "\"description\":\"Columnize by key column key column and value column value column with note column note column\","
+                + "\"description\":"
+                + new TextNode(OperationDescription.cell_key_value_columnize_note_column_brief("key column", "value column", "note column"))
+                        .toString()
+                + ","
                 + "\"keyColumnName\":\"key column\","
                 + "\"valueColumnName\":\"value column\","
                 + "\"noteColumnName\":\"note column\"}";
         TestUtils.isSerializedTo(ParsingUtilities.mapper.readValue(jsonFull, KeyValueColumnizeOperation.class), jsonFull);
     }
 
+    @Test
+    public void testValidate() {
+        assertThrows(IllegalArgumentException.class, () -> new KeyValueColumnizeOperation(null, "foo", "bar").validate());
+        assertThrows(IllegalArgumentException.class, () -> new KeyValueColumnizeOperation("foo", null, "bar").validate());
+    }
+
+    @Test
+    public void testColumnsDiff() {
+        assertEquals(new KeyValueColumnizeOperation("foo", "baz", "bar").getColumnsDiff(), Optional.empty());
+    }
+
+    @Test
+    public void testColumnsDependencies() {
+        assertEquals(new KeyValueColumnizeOperation("foo", "baz", "bar").getColumnDependencies().get(), Set.of("foo", "baz", "bar"));
+        assertEquals(new KeyValueColumnizeOperation("foo", "baz", null).getColumnDependencies().get(), Set.of("foo", "baz"));
+    }
+
+    @Test
+    public void testRename() {
+        KeyValueColumnizeOperation SUT = new KeyValueColumnizeOperation("foo", "baz", null);
+
+        KeyValueColumnizeOperation renamed = SUT.renameColumns(Map.of("foo", "foo2", "bar", "bar2"));
+
+        TestUtils.isSerializedTo(renamed, "{\n"
+                + "   \"description\" : " + new TextNode(OperationDescription.cell_key_value_columnize_brief("foo2", "baz")).toString()
+                + ",\n"
+                + "   \"keyColumnName\" : \"foo2\",\n"
+                + "   \"noteColumnName\" : null,\n"
+                + "   \"op\" : \"core/key-value-columnize\",\n"
+                + "   \"valueColumnName\" : \"baz\"\n"
+                + "}");
+    }
+
+    @Test
+    public void testRenameNoNotesColumn() {
+        KeyValueColumnizeOperation SUT = new KeyValueColumnizeOperation("foo", "baz", "bar");
+
+        KeyValueColumnizeOperation renamed = SUT.renameColumns(Map.of("foo", "foo2", "bar", "bar2"));
+
+        TestUtils.isSerializedTo(renamed, "{\n"
+                + "   \"description\" : "
+                + new TextNode(OperationDescription.cell_key_value_columnize_note_column_brief("foo2", "baz", "bar2")).toString() + ",\n"
+                + "   \"keyColumnName\" : \"foo2\",\n"
+                + "   \"noteColumnName\" : \"bar2\",\n"
+                + "   \"op\" : \"core/key-value-columnize\",\n"
+                + "   \"valueColumnName\" : \"baz\"\n"
+                + "}");
+    }
+
     /**
      * Test in the case where an ID is available in the first column.
+     * 
      * @throws Exception
      */
     @Test
     public void testKeyValueColumnizeWithID() throws Exception {
-        Project project = createCSVProject(
-                "ID,Cat,Val\n"
-                + "1,a,1\n"
-                + "1,b,3\n"
-                + "2,b,4\n"
-                + "2,c,5\n"
-                + "3,a,2\n"
-                + "3,b,5\n"
-                + "3,d,3\n");
+        Project project = createProject(
+                new String[] { "ID", "Cat", "Val" },
+                new Serializable[][] {
+                        { "1", "a", "1" },
+                        { "1", "b", "3" },
+                        { "2", "b", "4" },
+                        { "2", "c", "5" },
+                        { "3", "a", "2" },
+                        { "3", "b", "5" },
+                        { "3", "d", "3" }
+                });
 
         AbstractOperation op = new KeyValueColumnizeOperation(
                 "Cat", "Val", null);
 
-        Process process = op.createProcess(project, new Properties());
-        
-        process.performImmediate();
-            
-        // Expected output from the GUI. 
-        // ID,a,b,c,d
-        // 1,1,3,,
-        // 2,,4,5,
-        // 3,2,5,,3
-        Assert.assertEquals(project.columnModel.columns.size(), 5);
-        Assert.assertEquals(project.columnModel.columns.get(0).getName(), "ID");
-        Assert.assertEquals(project.columnModel.columns.get(1).getName(), "a");
-        Assert.assertEquals(project.columnModel.columns.get(2).getName(), "b");
-        Assert.assertEquals(project.columnModel.columns.get(3).getName(), "c");
-        Assert.assertEquals(project.columnModel.columns.get(4).getName(), "d");
-        Assert.assertEquals(project.rows.size(), 3);
-        
-        // The actual row data structure has to leave the columns model untouched for redo/undo purpose.
-        // So we have 2 empty columns(column 1,2) on the row level.
-        // 1,1,3,,
-        Assert.assertEquals(project.rows.get(0).cells.get(0).value, "1");
-        Assert.assertEquals(project.rows.get(0).cells.get(3).value, "1");
-        Assert.assertEquals(project.rows.get(0).cells.get(4).value, "3");
-        
-        // 2,,4,5,
-        Assert.assertEquals(project.rows.get(1).cells.get(0).value, "2");
-        Assert.assertEquals(project.rows.get(1).cells.get(4).value, "4");
-        Assert.assertEquals(project.rows.get(1).cells.get(5).value, "5");
-        
-        // 3,2,5,,3
-        Assert.assertEquals(project.rows.get(2).cells.get(0).value, "3");
-        Assert.assertEquals(project.rows.get(2).cells.get(3).value, "2");
-        Assert.assertEquals(project.rows.get(2).cells.get(4).value, "5");
-        Assert.assertEquals(project.rows.get(2).cells.get(6).value, "3");
+        runOperation(op, project);
+
+        Project expectedProject = createProject(
+                new String[] { "ID", "a", "b", "c", "d" },
+                new Serializable[][] {
+                        { "1", "1", "3", null, null },
+                        { "2", null, "4", "5", null },
+                        { "3", "2", "5", null, "3" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
-    
+
     /**
      * Test to demonstrate the intended behaviour of the function, for issue #1214
      * https://github.com/OpenRefine/OpenRefine/issues/1214
@@ -190,57 +214,122 @@ public class KeyValueColumnizeTests extends RefineTest {
 
     @Test
     public void testKeyValueColumnize() throws Exception {
-	String csv = "Key,Value\n"
-		+ "merchant,Katie\n"
-		+ "fruit,apple\n"
-		+ "price,1.2\n"
-		+ "fruit,pear\n"
-		+ "price,1.5\n"
-		+ "merchant,John\n"
-		+ "fruit,banana\n"
-		+ "price,3.1\n";
-	prepareOptions(",", 20, 0, 0, 1, false, false);
-        List<Exception> exceptions = new ArrayList<Exception>();
-        importer.parseOneFile(project, pm, job, "filesource", new StringReader(csv), -1, options, exceptions);
-        project.update();
-        ProjectManager.singleton.registerProject(project, pm);
+        Project project = createProject(
+                new String[] { "Key", "Value" },
+                new Serializable[][] {
+                        { "merchant", "Katie" },
+                        { "fruit", "apple" },
+                        { "price", "1.2" },
+                        { "fruit", "pear" },
+                        { "price", "1.5" },
+                        { "merchant", "John" },
+                        { "fruit", "banana" },
+                        { "price", "3.1" }
+                });
 
-	AbstractOperation op = new KeyValueColumnizeOperation(
-		"Key",
-		"Value",
-		null);
-        Process process = op.createProcess(project, new Properties());
-        process.performImmediate();
+        AbstractOperation op = new KeyValueColumnizeOperation(
+                "Key",
+                "Value",
+                null);
 
-	int merchantCol = project.columnModel.getColumnByName("merchant").getCellIndex();
-	int fruitCol = project.columnModel.getColumnByName("fruit").getCellIndex();
-	int priceCol = project.columnModel.getColumnByName("price").getCellIndex();
-	
-	Assert.assertEquals(project.rows.get(0).getCellValue(merchantCol), "Katie");
-	Assert.assertEquals(project.rows.get(1).getCellValue(merchantCol), null);
-	Assert.assertEquals(project.rows.get(2).getCellValue(merchantCol), "John");
-	Assert.assertEquals(project.rows.get(0).getCellValue(fruitCol), "apple");
-	Assert.assertEquals(project.rows.get(1).getCellValue(fruitCol), "pear");
-	Assert.assertEquals(project.rows.get(2).getCellValue(fruitCol), "banana");
-	Assert.assertEquals(project.rows.get(0).getCellValue(priceCol), "1.2");
-	Assert.assertEquals(project.rows.get(1).getCellValue(priceCol), "1.5");
-	Assert.assertEquals(project.rows.get(2).getCellValue(priceCol), "3.1");
+        runOperation(op, project);
+
+        Project expectedProject = createProject(
+                new String[] { "merchant", "fruit", "price" },
+                new Serializable[][] {
+                        { "Katie", "apple", "1.2" },
+                        { null, "pear", "1.5" },
+                        { "John", "banana", "3.1" },
+                });
+        assertProjectEquals(project, expectedProject);
     }
 
-    private void prepareOptions(
-            String sep, int limit, int skip, int ignoreLines,
-            int headerLines, boolean guessValueType, boolean ignoreQuotes) {
-            
-            whenGetStringOption("separator", options, sep);
-            whenGetIntegerOption("limit", options, limit);
-            whenGetIntegerOption("skipDataLines", options, skip);
-            whenGetIntegerOption("ignoreLines", options, ignoreLines);
-            whenGetIntegerOption("headerLines", options, headerLines);
-            whenGetBooleanOption("guessCellValueTypes", options, guessValueType);
-            whenGetBooleanOption("processQuotes", options, !ignoreQuotes);
-            whenGetBooleanOption("storeBlankCellsAsNulls", options, true);
-        }
+    @Test
+    public void testKeyValueColumnizeNotes() throws Exception {
+        Project project = createProject(
+                new String[] { "Key", "Value", "Notes" },
+                new Serializable[][] {
+                        { "merchant", "Katie", "ref" },
+                        { "fruit", "apple", "catalogue" },
+                        { "price", "1.2", "pricelist" },
+                        { "merchant", "John", "knowledge" },
+                        { "fruit", "banana", "survey" },
+                        { "price", "3.1", "legislation" }
+                });
 
+        KeyValueColumnizeOperation operation = new KeyValueColumnizeOperation(
+                "Key",
+                "Value",
+                "Notes");
+
+        runOperation(operation, project);
+
+        Project expected = createProject(
+                new String[] { "merchant", "fruit", "price", "Notes : merchant", "Notes : fruit", "Notes : price" },
+                new Serializable[][] {
+                        { "Katie", "apple", "1.2", "ref", "catalogue", "pricelist" },
+                        { "John", "banana", "3.1", "knowledge", "survey", "legislation" },
+                });
+        assertProjectEquals(project, expected);
+    }
+
+    @Test
+    public void testKeyValueColumnizeIdenticalValues() throws Exception {
+        Project project = createProject(
+                new String[] { "Key", "Value", "wd" },
+                new Serializable[][] {
+                        { "merchant", "Katie", "34" },
+                        { "fruit", "apple", "34" },
+                        { "price", "1.2", "34" },
+                        { "merchant", "John", "56" },
+                        { "fruit", "banana", "56" },
+                        { "price", "3.1", "56" }
+                });
+
+        KeyValueColumnizeOperation operation = new KeyValueColumnizeOperation(
+                "Key",
+                "Value",
+                null);
+
+        runOperation(operation, project);
+
+        Project expected = createProject(
+                new String[] { "wd", "merchant", "fruit", "price" },
+                new Serializable[][] {
+                        { "34", "Katie", "apple", "1.2" },
+                        { "56", "John", "banana", "3.1" }
+                });
+        assertProjectEquals(project, expected);
+    }
+
+    @Test
+    public void testCopyRowsWithNoKeys() throws Exception {
+        // when a key cell is empty, if there are other columns around, we simply copy those
+        Project project = createProject(
+                new String[] { "Key", "Value" },
+                new Serializable[][] {
+                        { "merchant", "Katie" },
+                        { "fruit", "apple" },
+                        { "price", "1.2", },
+                        { null, "John", },
+                        { "fruit", "banana" },
+                        { "price", "3.1", }
+                });
+
+        KeyValueColumnizeOperation operation = new KeyValueColumnizeOperation(
+                "Key",
+                "Value",
+                null);
+
+        runOperation(operation, project);
+
+        Project expected = createProject(
+                new String[] { "merchant", "fruit", "price" },
+                new Serializable[][] {
+                        { "Katie", "apple", "1.2" },
+                        { null, "banana", "3.1" },
+                });
+        assertProjectEquals(project, expected);
+    }
 
 }
-

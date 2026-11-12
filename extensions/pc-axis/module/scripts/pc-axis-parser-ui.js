@@ -23,31 +23,15 @@ LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
 A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
 OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
 SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,           
-DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY           
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
 THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
  */
 
-//Internationalization init
-
-var dictionary = {};
-$.ajax({
-url : "command/core/load-language?",
-type : "POST",
-async : false,
-data : {
-module : "pc-axis",
-},
-success : function(data) {
-dictionary = data['dictionary'];
-lang = data['lang'];
-}
-});
-$.i18n().load(dictionary, lang);
-// End internationalization
+I18NUtil.init("pc-axis");
 
 Refine.PCAxisParserUI = function(controller, jobID, job, format, config,
     dataContainerElmt, progressContainerElmt, optionContainerElmt) {
@@ -81,7 +65,7 @@ Refine.PCAxisParserUI.prototype.dispose = function() {
 
 Refine.PCAxisParserUI.prototype.getOptions = function() {
   var options = {
-    encoding: $.trim(this._optionContainerElmts.encodingInput[0].value)
+    encoding: jQueryTrim(this._optionContainerElmts.encodingInput[0].value)
   };
 
   var parseIntDefault = function(s, def) {
@@ -109,20 +93,22 @@ Refine.PCAxisParserUI.prototype.getOptions = function() {
   options.includeFileSources = this._optionContainerElmts.includeFileSourcesCheckbox[0].checked;
   options.includeArchiveFileName = this._optionContainerElmts.includeArchiveFileCheckbox[0].checked;
 
+  options.disableAutoPreview = this._optionContainerElmts.disableAutoPreviewCheckbox[0].checked;
+
   return options;
 };
 
 Refine.PCAxisParserUI.prototype._initialize = function() {
   var self = this;
 
-  this._optionContainer.unbind().empty().html(
+  this._optionContainer.off().empty().html(
       DOM.loadHTML("pc-axis", "scripts/pc-axis-parser-ui.html"));
   this._optionContainerElmts = DOM.bind(this._optionContainer);
-  this._optionContainerElmts.previewButton.click(function() { self._updatePreview(); });
+  this._optionContainerElmts.previewButton.on('click',function() { self._updatePreview(); });
 
   this._optionContainerElmts.encodingInput
     .val(this._config.encoding || '')
-    .click(function() {
+    .on('click',function() {
       Encoding.selectEncoding($(this), function() {
         self._updatePreview();
       });
@@ -143,11 +129,18 @@ Refine.PCAxisParserUI.prototype._initialize = function() {
     this._optionContainerElmts.includeArchiveFileCheckbox.prop("checked", true);
   }
 
+  if (this._config.disableAutoPreview) {
+    this._optionContainerElmts.disableAutoPreviewCheckbox.prop('checked', true);
+  }
+
   var onChange = function() {
-    self._scheduleUpdatePreview();
+    if (!self._optionContainerElmts.disableAutoPreviewCheckbox[0].checked)
+    {
+      self._scheduleUpdatePreview();
+    }
   };
-  this._optionContainer.find("input").bind("change", onChange);
-  this._optionContainer.find("select").bind("change", onChange);
+  this._optionContainer.find("input").on("change", onChange);
+  this._optionContainer.find("select").on("change", onChange);
 };
 
 Refine.PCAxisParserUI.prototype._scheduleUpdatePreview = function() {
@@ -173,7 +166,7 @@ Refine.PCAxisParserUI.prototype._updatePreview = function() {
       self._controller.getPreviewData(function(projectData) {
         self._progressContainer.hide();
 
-        new Refine.PreviewTable(projectData, self._dataContainer.unbind().empty());
+        new Refine.PreviewTable(projectData, self._dataContainer.off().empty());
       });
     }
   });

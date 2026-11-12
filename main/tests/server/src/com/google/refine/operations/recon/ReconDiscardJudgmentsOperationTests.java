@@ -24,34 +24,135 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.operations.recon;
+
+import static org.testng.Assert.assertEquals;
+
+import java.io.Serializable;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+import com.fasterxml.jackson.databind.node.TextNode;
+import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.BeforeSuite;
 import org.testng.annotations.Test;
 
 import com.google.refine.RefineTest;
+import com.google.refine.browsing.Engine.Mode;
+import com.google.refine.browsing.EngineConfig;
+import com.google.refine.model.AbstractOperation;
+import com.google.refine.model.Cell;
+import com.google.refine.model.ColumnsDiff;
+import com.google.refine.model.Project;
+import com.google.refine.model.Recon;
+import com.google.refine.operations.OperationDescription;
 import com.google.refine.operations.OperationRegistry;
-import com.google.refine.operations.recon.ReconDiscardJudgmentsOperation;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
 public class ReconDiscardJudgmentsOperationTests extends RefineTest {
+
+    String json = "{\n" +
+            "    \"op\": \"core/recon-discard-judgments\",\n" +
+            "    \"description\": "
+            + new TextNode(OperationDescription.recon_discard_judgments_clear_data_brief("researcher")).toString() + ",\n" +
+            "    \"engineConfig\": {\n" +
+            "      \"mode\": \"record-based\",\n" +
+            "      \"facets\": []\n" +
+            "    },\n" +
+            "    \"columnName\": \"researcher\",\n" +
+            "    \"clearData\": true\n" +
+            "  }";
+    Project project;
+
     @BeforeSuite
     public void registerOperation() {
         OperationRegistry.registerOperation(getCoreModule(), "recon-discard-judgments", ReconDiscardJudgmentsOperation.class);
     }
-    
+
+    @BeforeMethod
+    public void setupInitialState() {
+        project = createProject(
+                new String[] { "foo", "bar" },
+                new Serializable[][] {
+                        { "a", new Cell("b", testRecon("e", "h", Recon.Judgment.Matched, 1234L)) },
+                        { "c", new Cell("d", testRecon("b", "j", Recon.Judgment.None, 5678L)) }
+                });
+    }
+
     @Test
     public void serializeReconDiscardJudgmentsOperation() throws Exception {
-        String json = "{\n" + 
-                "    \"op\": \"core/recon-discard-judgments\",\n" + 
-                "    \"description\": \"Discard recon judgments and clear recon data for cells in column researcher\",\n" + 
-                "    \"engineConfig\": {\n" + 
-                "      \"mode\": \"record-based\",\n" + 
-                "      \"facets\": []\n" + 
-                "    },\n" + 
-                "    \"columnName\": \"researcher\",\n" + 
-                "    \"clearData\": true\n" + 
-                "  }";
         TestUtils.isSerializedTo(ParsingUtilities.mapper.readValue(json, ReconDiscardJudgmentsOperation.class), json);
+    }
+
+    @Test
+    public void testColumnDependencies() throws Exception {
+        AbstractOperation op = ParsingUtilities.mapper.readValue(json, ReconDiscardJudgmentsOperation.class);
+        assertEquals(op.getColumnsDiff(), Optional.of(ColumnsDiff.modifySingleColumn("researcher")));
+        assertEquals(op.getColumnDependencies(), Optional.of(Set.of("researcher")));
+    }
+
+    @Test
+    public void testRename() throws Exception {
+        AbstractOperation op = ParsingUtilities.mapper.readValue(json, ReconDiscardJudgmentsOperation.class);
+
+        AbstractOperation renamed = op.renameColumns(Map.of("researcher", "employee"));
+
+        String expectedJson = "{\n" +
+                "    \"op\": \"core/recon-discard-judgments\",\n" +
+                "    \"description\": "
+                + new TextNode(OperationDescription.recon_discard_judgments_clear_data_brief("employee")).toString() + ",\n" +
+                "    \"engineConfig\": {\n" +
+                "      \"mode\": \"record-based\",\n" +
+                "      \"facets\": []\n" +
+                "    },\n" +
+                "    \"columnName\": \"employee\",\n" +
+                "    \"clearData\": true\n" +
+                "  }";
+        TestUtils.isSerializedTo(renamed, expectedJson);
+    }
+
+    @Test
+    public void testReconDiscardJudgmentsOperation() throws Exception {
+        AbstractOperation operation = new ReconDiscardJudgmentsOperation(
+                new EngineConfig(Collections.emptyList(), Mode.RowBased), "bar", false);
+
+        runOperation(operation, project);
+
+        long historyEntryId = project.history.getLastPastEntries(1).get(0).id;
+        Recon reconE = testRecon("e", "h", Recon.Judgment.None, project.rows.get(0).getCell(1).recon.id);
+        reconE.features = new Object[] { null, null, null, null };
+        reconE.judgmentAction = "mass";
+        reconE.judgmentHistoryEntry = historyEntryId;
+        Recon reconB = testRecon("b", "j", Recon.Judgment.None, project.rows.get(1).getCell(1).recon.id);
+        reconB.features = new Object[] { null, null, null, null };
+        reconB.judgmentAction = "mass";
+        reconB.judgmentHistoryEntry = historyEntryId;
+        Project expected = createProject(
+                new String[] { "foo", "bar" },
+                new Serializable[][] {
+                        { "a", new Cell("b", reconE) },
+                        { "c", new Cell("d", reconB) }
+                });
+        assertProjectEquals(project, expected);
+    }
+
+    @Test
+    public void testClearReconOperation() throws Exception {
+        AbstractOperation operation = new ReconDiscardJudgmentsOperation(
+                new EngineConfig(Collections.emptyList(), Mode.RowBased), "bar", true);
+
+        runOperation(operation, project);
+
+        Project expected = createProject(
+                new String[] { "foo", "bar" },
+                new Serializable[][] {
+                        { "a", "b" },
+                        { "c", "d" }
+                });
+        assertProjectEquals(project, expected);
     }
 }

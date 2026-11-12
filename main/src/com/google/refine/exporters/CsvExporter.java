@@ -33,40 +33,50 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.exporters;
 
+import java.io.FilterWriter;
 import java.io.IOException;
 import java.io.Writer;
 import java.util.List;
 import java.util.Properties;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.univocity.parsers.common.AbstractWriter;
+import com.univocity.parsers.csv.CsvFormat;
+import com.univocity.parsers.csv.CsvWriter;
+import com.univocity.parsers.csv.CsvWriterSettings;
+import com.univocity.parsers.tsv.TsvWriter;
+import com.univocity.parsers.tsv.TsvWriterSettings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import com.google.refine.browsing.Engine;
 import com.google.refine.model.Project;
 import com.google.refine.util.ParsingUtilities;
 
-import au.com.bytecode.opencsv.CSVWriter;
+public class CsvExporter implements WriterExporter {
 
-public class CsvExporter implements WriterExporter{
+    static CsvFormat DEFAULT_FORMAT = new CsvWriterSettings().getFormat();
+    static String DEFAULT_LINE_ENDING = DEFAULT_FORMAT.getLineSeparatorString();
 
     final static Logger logger = LoggerFactory.getLogger("CsvExporter");
     char separator;
 
     public CsvExporter() {
-        separator = ','; //Comma separated-value is default
+        separator = ','; // Comma separated-value is default
     }
 
     public CsvExporter(char separator) {
         this.separator = separator;
     }
-    
+
     private static class Configuration {
+
         @JsonProperty("separator")
         protected String separator = null;
         @JsonProperty("lineSeparator")
-        protected String lineSeparator = CSVWriter.DEFAULT_LINE_END;
+        protected String lineSeparator = DEFAULT_LINE_ENDING;
         @JsonProperty("quoteAll")
         protected boolean quoteAll = false;
     }
@@ -74,7 +84,7 @@ public class CsvExporter implements WriterExporter{
     @Override
     public void export(Project project, Properties params, Engine engine, final Writer writer)
             throws IOException {
-        
+
         String optionsString = (params == null) ? null : params.getProperty("options");
         Configuration options = new Configuration();
         if (optionsString != null) {
@@ -82,57 +92,142 @@ public class CsvExporter implements WriterExporter{
                 options = ParsingUtilities.mapper.readValue(optionsString, Configuration.class);
             } catch (IOException e) {
                 // Ignore and keep options null.
-                e.printStackTrace();
+                logger.warn("Invalid options string ignored: {}", optionsString, e);
             }
         }
         if (options.separator == null) {
             options.separator = Character.toString(separator);
         }
-        
+
         final String separator = options.separator;
         final String lineSeparator = options.lineSeparator;
         final boolean quoteAll = options.quoteAll;
-        
-        final boolean printColumnHeader =
-            (params != null && params.getProperty("printColumnHeader") != null) ?
-                Boolean.parseBoolean(params.getProperty("printColumnHeader")) :
-                true;
-        
-        final CSVWriter csvWriter = 
-            new CSVWriter(writer, separator.charAt(0), CSVWriter.DEFAULT_QUOTE_CHARACTER, lineSeparator);
-        
+
+        final boolean printColumnHeader = (params != null && params.getProperty("printColumnHeader") != null)
+                ? Boolean.parseBoolean(params.getProperty("printColumnHeader"))
+                : true;
+
+        AbstractWriter csvWriter;
+        if ("\t".equals(separator)) {
+            TsvWriterSettings tsvSettings = new TsvWriterSettings();
+            if (lineSeparator.contains(String.valueOf(tsvSettings.getFormat().getEscapeChar()))) {
+                throw new IOException("Line separator cannot contain the escape character (\\)");
+            }
+            tsvSettings.setIgnoreLeadingWhitespaces(false);
+            tsvSettings.setIgnoreTrailingWhitespaces(false);
+            tsvSettings.getFormat().setLineSeparator(lineSeparator);
+            // TODO: We need an export setting to control whether we escape output
+            csvWriter = new TsvWriter(new DoubleBackslashFilterWriter(writer), tsvSettings);
+        } else {
+            CsvWriterSettings settings = new CsvWriterSettings();
+            settings.setIgnoreLeadingWhitespaces(false);
+            settings.setIgnoreTrailingWhitespaces(false);
+            settings.setQuoteAllFields(quoteAll); // CSV only
+            settings.getFormat().setLineSeparator(lineSeparator);
+            settings.getFormat().setDelimiter(separator);
+
+            // Required for our test exportCsvWithQuote which wants the value "line has \"quote\""
+            // to be exported as "\"line has \"\"quote\"\"", although the default of literal value
+            // without the extra quoting is arguably cleaner
+            settings.setEscapeUnquotedValues(true);
+            settings.setQuoteEscapingEnabled(true);
+
+            csvWriter = new CsvWriter(writer, settings);
+        }
+
         TabularSerializer serializer = new TabularSerializer() {
+
             @Override
             public void startFile(JsonNode options) {
             }
 
             @Override
             public void endFile() {
+                csvWriter.flush();
             }
 
             @Override
             public void addRow(List<CellData> cells, boolean isHeader) {
                 if (!isHeader || printColumnHeader) {
-                    String[] strings = new String[cells.size()];
-                    for (int i = 0; i < strings.length; i++) {
-                        CellData cellData = cells.get(i);
-                        strings[i] =
-                            (cellData != null && cellData.text != null) ?
-                            cellData.text :
-                            "";
-                    }
-                    csvWriter.writeNext(strings, quoteAll);
+                    Stream<String> strings = cells.stream()
+                            .map(cellData -> (cellData != null && cellData.text != null) ? cellData.text : "");
+                    csvWriter.writeRow(strings.toArray());
                 }
             }
         };
-        
+
         CustomizableTabularExporterUtilities.exportRows(project, engine, params, serializer);
-        
-        csvWriter.close();
+
     }
 
     @Override
     public String getContentType() {
         return "text/plain";
     }
+
+    /**
+     * Filter to work around the fact that the TSV writer doesn't offer a setting to avoid escaping backslashes, so we
+     * collapse doubled backslashes after the fact while leaving {@code \t}, {@code \n}, and {@code \r} alone.
+     */
+    private static class DoubleBackslashFilterWriter extends FilterWriter {
+
+        private boolean pendingBackslash = false;
+
+        private DoubleBackslashFilterWriter(Writer out) {
+            super(out);
+        }
+
+        @Override
+        public void write(int c) throws IOException {
+            writeChar((char) c);
+        }
+
+        @Override
+        public void write(char[] cbuf, int off, int len) throws IOException {
+            for (int i = off; i < off + len; i++) {
+                writeChar(cbuf[i]);
+            }
+        }
+
+        @Override
+        public void write(String str, int off, int len) throws IOException {
+            for (int i = off; i < off + len; i++) {
+                writeChar(str.charAt(i));
+            }
+        }
+
+        @Override
+        public void flush() throws IOException {
+            flushPendingBackslash();
+            super.flush();
+        }
+
+        @Override
+        public void close() throws IOException {
+            flushPendingBackslash();
+            super.close();
+        }
+
+        private void writeChar(char c) throws IOException {
+            if (c == '\\') {
+                if (pendingBackslash) {
+                    out.write('\\');
+                    pendingBackslash = false;
+                } else {
+                    pendingBackslash = true;
+                }
+            } else {
+                flushPendingBackslash();
+                out.write(c);
+            }
+        }
+
+        private void flushPendingBackslash() throws IOException {
+            if (pendingBackslash) {
+                out.write('\\');
+                pendingBackslash = false;
+            }
+        }
+    }
+
 }

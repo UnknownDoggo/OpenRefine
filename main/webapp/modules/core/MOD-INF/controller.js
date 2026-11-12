@@ -86,6 +86,7 @@ function registerCommands() {
 
   RS.registerCommand(module, "undo-redo", new Packages.com.google.refine.commands.history.UndoRedoCommand());
   RS.registerCommand(module, "apply-operations", new Packages.com.google.refine.commands.history.ApplyOperationsCommand());
+  RS.registerCommand(module, "get-column-dependencies", new Packages.com.google.refine.commands.history.GetColumnDependenciesCommand());
   RS.registerCommand(module, "cancel-processes", new Packages.com.google.refine.commands.history.CancelProcessesCommand());
 
   RS.registerCommand(module, "compute-facets", new Packages.com.google.refine.commands.browsing.ComputeFacetsCommand());
@@ -114,8 +115,6 @@ function registerCommands() {
   RS.registerCommand(module, "split-column", new Packages.com.google.refine.commands.column.SplitColumnCommand());
   RS.registerCommand(module, "reorder-columns", new Packages.com.google.refine.commands.column.ReorderColumnsCommand());
 
-  RS.registerCommand(module, "denormalize", new Packages.com.google.refine.commands.row.DenormalizeCommand());
-
   RS.registerCommand(module, "reconcile", new Packages.com.google.refine.commands.recon.ReconcileCommand());
   RS.registerCommand(module, "recon-match-best-candidates", new Packages.com.google.refine.commands.recon.ReconMatchBestCandidatesCommand());
   RS.registerCommand(module, "recon-mark-new-topics", new Packages.com.google.refine.commands.recon.ReconMarkNewTopicsCommand());
@@ -136,6 +135,9 @@ function registerCommands() {
   RS.registerCommand(module, "annotate-rows", new Packages.com.google.refine.commands.row.AnnotateRowsCommand());
   RS.registerCommand(module, "remove-rows", new Packages.com.google.refine.commands.row.RemoveRowsCommand());
   RS.registerCommand(module, "reorder-rows", new Packages.com.google.refine.commands.row.ReorderRowsCommand());
+  RS.registerCommand(module, "add-rows", new Packages.com.google.refine.commands.row.AddRowsCommand());
+  RS.registerCommand(module, "remove-duplicate-rows", new Packages.com.google.refine.commands.row.RemoveDuplicateRowsCommand());
+  RS.registerCommand(module, "keep-matching-rows", new Packages.com.google.refine.commands.row.KeepMatchingRowsCommand());
 
   RS.registerCommand(module, "get-expression-language-info", new Packages.com.google.refine.commands.expr.GetExpressionLanguageInfoCommand());
   RS.registerCommand(module, "get-expression-history", new Packages.com.google.refine.commands.expr.GetExpressionHistoryCommand());
@@ -148,10 +150,8 @@ function registerCommands() {
   RS.registerCommand(module, "get-all-preferences", new Packages.com.google.refine.commands.GetAllPreferencesCommand());
   RS.registerCommand(module, "set-preference", new Packages.com.google.refine.commands.SetPreferenceCommand());
   RS.registerCommand(module, "open-workspace-dir", new Packages.com.google.refine.commands.OpenWorkspaceDirCommand());
+  RS.registerCommand(module, "open-extensions-dir", new Packages.com.google.refine.commands.OpenExtensionsDirCommand());
   
-  RS.registerCommand(module, "authorize", new Packages.com.google.refine.commands.auth.AuthorizeCommand());
-  RS.registerCommand(module, "deauthorize", new Packages.com.google.refine.commands.auth.DeAuthorizeCommand());
-
 }
 
 function registerOperations() {
@@ -170,8 +170,13 @@ function registerOperations() {
 
   OR.registerOperation(module, "column-addition", Packages.com.google.refine.operations.column.ColumnAdditionOperation);
   OR.registerOperation(module, "column-removal", Packages.com.google.refine.operations.column.ColumnRemovalOperation);
+  OR.registerOperation(module, "column-multi-removal", Packages.com.google.refine.operations.column.ColumnMultiRemovalOperation);
   OR.registerOperation(module, "column-rename", Packages.com.google.refine.operations.column.ColumnRenameOperation);
   OR.registerOperation(module, "column-move", Packages.com.google.refine.operations.column.ColumnMoveOperation);
+  OR.registerOperation(module, "column-move-left", Packages.com.google.refine.operations.column.ColumnMoveLeftOperation);
+  OR.registerOperation(module, "column-move-right", Packages.com.google.refine.operations.column.ColumnMoveRightOperation);
+  OR.registerOperation(module, "column-move-first", Packages.com.google.refine.operations.column.ColumnMoveFirstOperation);
+  OR.registerOperation(module, "column-move-last", Packages.com.google.refine.operations.column.ColumnMoveLastOperation);
   OR.registerOperation(module, "column-split", Packages.com.google.refine.operations.column.ColumnSplitOperation);
   OR.registerOperation(module, "column-addition-by-fetching-urls", Packages.com.google.refine.operations.column.ColumnAdditionByFetchingURLsOperation);
   OR.registerOperation(module, "column-reorder", Packages.com.google.refine.operations.column.ColumnReorderOperation);
@@ -180,6 +185,9 @@ function registerOperations() {
   OR.registerOperation(module, "row-star", Packages.com.google.refine.operations.row.RowStarOperation);
   OR.registerOperation(module, "row-flag", Packages.com.google.refine.operations.row.RowFlagOperation);
   OR.registerOperation(module, "row-reorder", Packages.com.google.refine.operations.row.RowReorderOperation);
+  OR.registerOperation(module, "row-addition", Packages.com.google.refine.operations.row.RowAdditionOperation);
+  OR.registerOperation(module, "row-duplicate-removal", Packages.com.google.refine.operations.row.RowDuplicatesRemovalOperation);
+  OR.registerOperation(module, "row-keep-matched", Packages.com.google.refine.operations.row.RowKeepMatchedOperation);
 
   OR.registerOperation(module, "recon", Packages.com.google.refine.operations.recon.ReconOperation);
   OR.registerOperation(module, "recon-mark-new-topics", Packages.com.google.refine.operations.recon.ReconMarkNewTopicsOperation);
@@ -324,6 +332,42 @@ function registerImporting() {
   );
 }
 
+function registerExporters() {
+   var ER = Packages.com.google.refine.exporters.ExporterRegistry;
+   ER.registerExporter("csv", new Packages.com.google.refine.exporters.CsvExporter());
+   ER.registerExporter("tsv", new Packages.com.google.refine.exporters.CsvExporter('\t'.charAt(0)));
+   ER.registerExporter("*sv", new Packages.com.google.refine.exporters.CsvExporter());
+   ER.registerExporter("xls", new Packages.com.google.refine.exporters.XlsExporter(false));
+   ER.registerExporter("xlsx", new Packages.com.google.refine.exporters.XlsExporter(true));
+   ER.registerExporter("ods", new Packages.com.google.refine.exporters.OdsExporter());
+   ER.registerExporter("html", new Packages.com.google.refine.exporters.HtmlTableExporter());
+   ER.registerExporter("template", new Packages.com.google.refine.exporters.TemplatingExporter());
+   ER.registerExporter("sql", new Packages.com.google.refine.exporters.sql.SqlExporter());
+}
+
+function registerLanguages() {
+  var MP = Packages.com.google.refine.expr.MetaParser;
+  MP.registerLanguageParser("grel", "General Refine Expression Language (GREL)", Packages.com.google.refine.grel.Parser.grelParser, "value");
+  MP.registerLanguageParser("clojure", "Clojure", new Packages.com.google.refine.expr.ClojureParser(), "value");
+}
+
+function registerDistances() {
+   var DF = Packages.com.google.refine.clustering.knn.DistanceFactory;
+   var VicinoDistance = Packages.com.google.refine.clustering.knn.VicinoDistance;
+   DF.put("levenshtein", new Packages.com.google.refine.clustering.knn.ApacheLevenshteinDistance());
+   DF.put("ppm", new VicinoDistance(new Packages.edu.mit.simile.vicino.distances.PPMDistance()));
+}
+
+function registerKeyers() {
+   var KF = Packages.com.google.refine.clustering.binning.KeyerFactory;
+   KF.put("fingerprint", new Packages.com.google.refine.clustering.binning.FingerprintKeyer());
+   KF.put("ngram-fingerprint", new Packages.com.google.refine.clustering.binning.NGramFingerprintKeyer());
+   KF.put("metaphone3", new Packages.com.google.refine.clustering.binning.Metaphone3Keyer());
+   KF.put("cologne-phonetic", new Packages.com.google.refine.clustering.binning.ColognePhoneticKeyer());
+   KF.put("daitch-mokotoff", new Packages.com.google.refine.clustering.binning.DaitchMokotoffKeyer());
+   KF.put("beider-morse", new Packages.com.google.refine.clustering.binning.BeiderMorseKeyer());
+}
+
 /*
  *  This optional function is invoked from the module's init() Java function.
  */
@@ -333,23 +377,27 @@ function init() {
   registerCommands();
   registerOperations();
   registerImporting();
+  registerExporters();
+  registerLanguages();
+  registerDistances();
+  registerKeyers();
 
   var commonModules = [
-      "externals/jquery-1.12.4.js",
-      "externals/jquery-migrate-1.4.1.js",
-      "externals/jquery-ui/jquery-ui.js",
-      "externals/js.cookie.js",
-      "externals/underscore-min.js",
+      "3rdparty/jquery.js",
+      "3rdparty/jquery-migrate.js",
+      "3rdparty/jquery-ui/jquery-ui.js",
+      "3rdparty/js.cookie.js",
+      "3rdparty/underscore.js",
 
-      "externals/CLDRPluralRuleParser.js",
-      "externals/jquery.i18n.js",
-      "externals/jquery.i18n.messagestore.js",
-      "externals/jquery.i18n.fallbacks.js",
-      "externals/jquery.i18n.parser.js",
-      "externals/jquery.i18n.emitter.js",
-      "externals/jquery.i18n.language.js",
-      "externals/languages/fi.js",
-      "externals/languages/ru.js",
+      "3rdparty/jquery.i18n/CLDRPluralRuleParser.js",
+      "3rdparty/jquery.i18n/jquery.i18n.js",
+      "3rdparty/jquery.i18n/jquery.i18n.messagestore.js",
+      "3rdparty/jquery.i18n/jquery.i18n.fallbacks.js",
+      "3rdparty/jquery.i18n/jquery.i18n.parser.js",
+      "3rdparty/jquery.i18n/jquery.i18n.emitter.js",
+      "3rdparty/jquery.i18n/jquery.i18n.language.js",
+      "3rdparty/jquery.i18n/languages/fi.js",
+      "3rdparty/jquery.i18n/languages/ru.js",
     ];
 
   var RC = Packages.com.google.refine.model.recon.ReconConfig;
@@ -359,29 +407,30 @@ function init() {
     "index/scripts",
     module,
     commonModules.concat([
-      "externals/date.js",
-      "externals/tablesorter/jquery.tablesorter.min.js",
-      "externals/moment-with-locales.min.js",
-      "externals/select2/select2.min.js",
-      "externals/jquery.lavalamp.min.js",
+      "3rdparty/tablesorter/jquery.tablesorter.js",
+      "3rdparty/select2/select2.js",
 
       "scripts/util/misc.js",
       "scripts/util/url.js",
       "scripts/util/string.js",
       "scripts/util/ajax.js",
+      "scripts/util/i18n.js",
+      "scripts/util/csrf.js",
       "scripts/util/menu.js",
       "scripts/util/dialog.js",
       "scripts/util/dom.js",
-      "scripts/util/date-time.js",
       "scripts/util/encoding.js",
+      "scripts/util/host.js",
       "scripts/util/sign.js",
       "scripts/util/filter-lists.js",
+      "scripts/util/filter-lists-search.js",
 
       "scripts/index.js",
       "scripts/index/create-project-ui.js",
       "scripts/index/open-project-ui.js",
       "scripts/index/import-project-ui.js",
       "scripts/index/lang-settings-ui.js",
+      "scripts/index/manage-extensions-ui.js",
 
       "scripts/index/default-importing-controller/controller.js",
       "scripts/index/default-importing-controller/file-selection-panel.js",
@@ -407,30 +456,31 @@ function init() {
     "index/styles",
     module,
     [
-      "externals/jquery-ui/css/ui-lightness/jquery-ui.css",
-      "externals/select2/select2.css",
-      "externals/tablesorter/theme.blue.css",
-      "styles/jquery-ui-overrides.less",
-      "styles/common.less",
-      "styles/pure.css",
-      "styles/util/dialog.less",
-      "styles/util/encoding.less",
-      
-      "styles/index.less",
-      "styles/index/create-project-ui.less",
-      "styles/index/open-project-ui.less",
-      "styles/index/import-project-ui.less",
+      "3rdparty/jquery-ui/css/ui-lightness/jquery-ui.css",
+      "3rdparty/select2/select2.css",
+      "3rdparty/tablesorter/theme.blue.css",
 
-      "styles/index/default-importing-controller.less",
-      "styles/index/default-importing-file-selection-panel.less",
-      "styles/index/default-importing-parsing-panel.less",
+      "styles/theme.css",
+      "styles/jquery-ui-overrides.css",
+      "styles/common.css",
+      "styles/util/dialog.css",
+      "styles/util/encoding.css",
 
-      "styles/index/default-importing-sources.less",
-      "styles/views/data-table-view.less", // for the preview table's styles
-      "styles/index/fixed-width-parser-ui.less",
-      "styles/index/xml-parser-ui.less",
-      "styles/index/json-parser-ui.less",
-      "styles/index/wikitext-parser-ui.less",
+      "styles/index.css",
+      "styles/index/create-project-ui.css",
+      "styles/index/open-project-ui.css",
+      "styles/index/import-project-ui.css",
+
+      "styles/index/default-importing-controller.css",
+      "styles/index/default-importing-file-selection-panel.css",
+      "styles/index/default-importing-parsing-panel.css",
+
+      "styles/index/default-importing-sources.css",
+      "styles/views/data-table-view.css", // for the preview table's styles
+      "styles/index/fixed-width-parser-ui.css",
+      "styles/index/xml-parser-ui.css",
+      "styles/index/json-parser-ui.css",
+      "styles/index/wikitext-parser-ui.css",
     ]
   );
 
@@ -439,10 +489,9 @@ function init() {
     module,
     commonModules.concat([
       "externals/suggest/suggest-4_3a.js",
-      "externals/date.js",
-
+      "scripts/util/i18n.js",
+      "scripts/util/csrf.js",
       "scripts/project.js",
-
       "scripts/util/misc.js",
       "scripts/util/url.js",
       "scripts/util/string.js",
@@ -450,13 +499,13 @@ function init() {
       "scripts/util/menu.js",
       "scripts/util/dialog.js",
       "scripts/util/dom.js",
-      "scripts/util/date-time.js",
       "scripts/util/custom-suggest.js",
       "scripts/util/encoding.js",
       "scripts/util/sign.js",
 
       "scripts/widgets/histogram-widget.js",
       "scripts/widgets/slider-widget.js",
+      "scripts/widgets/recipe-widget.js",
 
       "scripts/project/browsing-engine.js",
       "scripts/project/history-panel.js",
@@ -465,6 +514,8 @@ function init() {
       "scripts/project/summary-bar.js",
       "scripts/project/exporters.js",
       "scripts/project/scripting.js",
+      "scripts/project/operation-icons.js",
+      "scripts/project/facet-icons.js",
 
       "scripts/facets/facet.js",
       "scripts/facets/list-facet.js",
@@ -473,6 +524,12 @@ function init() {
       "externals/imgareaselect/jquery.imgareaselect.js", // Used by scatterplot facet only
       "scripts/facets/scatterplot-facet.js",
       "scripts/facets/text-search-facet.js",
+
+      "scripts/views/data-table/cell-renderers/null-renderer.js",
+      "scripts/views/data-table/cell-renderers/error-renderer.js",
+      "scripts/views/data-table/cell-renderers/simple-value-renderer.js",
+      "scripts/views/data-table/cell-renderers/recon-renderer.js",
+      "scripts/views/data-table/cell-renderers/registry.js",
 
       "scripts/views/data-table/data-table-view.js",
       "scripts/views/data-table/cell-ui.js",
@@ -484,18 +541,27 @@ function init() {
 
       "scripts/reconciliation/recon-manager.js",
       "scripts/reconciliation/recon-dialog.js",
+      "scripts/reconciliation/recon-dialog-2.js",
       "scripts/reconciliation/standard-service-panel.js",
 
+      "scripts/dialogs/extract-operations-dialog.js",
+      "scripts/dialogs/apply-operations-dialog.js",
+
       "scripts/dialogs/expression-preview-dialog.js",
-      "scripts/dialogs/extend-data-preview-dialog.js",
+      "scripts/dialogs/add-column-by-reconciliation.js",
       "scripts/dialogs/clustering-dialog.js",
       "scripts/dialogs/scatterplot-dialog.js",
       "scripts/dialogs/templating-exporter-dialog.js",
       "scripts/dialogs/column-reordering-dialog.js",
+      "scripts/dialogs/common-transform-dialog.js",
+      "scripts/dialogs/column-mapping-dialog.js",
       "scripts/dialogs/custom-tabular-exporter-dialog.js",
       "scripts/dialogs/sql-exporter-dialog.js",
       "scripts/dialogs/expression-column-dialog.js",
       "scripts/dialogs/http-headers-dialog.js",
+      "scripts/dialogs/clustering-functions-dialog.js",
+      "scripts/dialogs/add-rows-dialog.js",
+      "scripts/dialogs/remove-duplicate-rows-dialog.js"
     ])
   );
 
@@ -503,39 +569,44 @@ function init() {
     "project/styles",
     module,
     [
-      "externals/suggest/css/suggest-4_3.min.css",
-      "externals/jquery-ui/css/ui-lightness/jquery-ui.css",
+      "externals/suggest/css/suggest-4_3.css",
+      "3rdparty/jquery-ui/css/ui-lightness/jquery-ui.css",
       "externals/imgareaselect/css/imgareaselect-default.css",
 
-      "styles/jquery-ui-overrides.less",
-      "styles/common.less",
-      "styles/pure.css",
+      "styles/theme.css",
+      "styles/jquery-ui-overrides.css",
+      "styles/common.css",
 
-      "styles/util/menu.less",
-      "styles/util/dialog.less",
-      "styles/util/custom-suggest.less",
-      "styles/util/encoding.less",
+      "styles/util/menu.css",
+      "styles/util/dialog.css",
+      "styles/util/custom-suggest.css",
+      "styles/util/encoding.css",
 
-      "styles/project.less",
-      "styles/project/sidebar.less",
-      "styles/project/facets.less",
-      "styles/project/process.less",
+      "styles/project.css",
+      "styles/project/sidebar.css",
+      "styles/project/facets.css",
+      "styles/project/process.css",
 
-      "styles/widgets/histogram-widget.less",
-      "styles/widgets/slider-widget.less",
+      "styles/widgets/histogram-widget.css",
+      "styles/widgets/slider-widget.css",
 
-      "styles/views/data-table-view.less",
-      "styles/views/column-join.less",
+      "styles/views/data-table-view.css",
+      "styles/views/column-join.css",
 
-      "styles/dialogs/expression-preview-dialog.less",
-      "styles/dialogs/clustering-dialog.less",
-      "styles/dialogs/scatterplot-dialog.less",
-      "styles/dialogs/column-reordering-dialog.less",
-      "styles/dialogs/custom-tabular-exporter-dialog.less",
-      "styles/dialogs/sql-exporter-dialog.less",
-      "styles/reconciliation/recon-dialog.less",
-      "styles/reconciliation/standard-service-panel.less",
-      "styles/reconciliation/extend-data-preview-dialog.less",
+      "styles/dialogs/clustering-functions-dialog.css",
+      "styles/dialogs/expression-preview-dialog.css",
+      "styles/dialogs/clustering-dialog.css",
+      "styles/dialogs/scatterplot-dialog.css",
+      "styles/dialogs/column-reordering-dialog.css",
+      "styles/dialogs/custom-tabular-exporter-dialog.css",
+      "styles/dialogs/sql-exporter-dialog.css",
+      "styles/dialogs/recon-service-selection-dialog.css",
+      "styles/dialogs/confirm-history-erasure-dialog.less",
+      "styles/reconciliation/recon-dialog.css",
+      "styles/reconciliation/standard-service-panel.css",
+      "styles/reconciliation/add-column-by-reconciliation.css",
+      "styles/dialogs/column-mapping-dialog.css",
+      "styles/dialogs/remove-duplicate-rows-dialog.css"
     ]
   );
 
@@ -543,6 +614,8 @@ function init() {
     "preferences/scripts",
     module,
     commonModules.concat([
+      "scripts/util/i18n.js",
+      "scripts/util/csrf.js",
       "scripts/preferences.js",
     ])
   );
@@ -550,12 +623,13 @@ function init() {
     "preferences/styles",
     module,
     [
-      "externals/suggest/css/suggest-4_3.min.css",
-      "externals/jquery-ui/css/ui-lightness/jquery-ui.css",
-      "styles/jquery-ui-overrides.less",
-      "styles/common.less",
-      "styles/pure.css",
-      "styles/util/dialog.less"
+      "externals/suggest/css/suggest-4_3.css",
+      "3rdparty/jquery-ui/css/ui-lightness/jquery-ui.css",
+
+      "styles/theme.css",
+      "styles/jquery-ui-overrides.css",
+      "styles/common.css",
+      "styles/util/dialog.css"
     ]
   );
 }
@@ -569,7 +643,7 @@ function process(path, request, response) {
     butterfly.sendString(
       request, 
       response, 
-      "var ModuleWirings = " + butterfly.toJSONString(wirings) + ";", 
+      "var ModuleWirings = " + JSON.stringify(wirings) + ";",
       encoding, 
       "text/javascript"
     );
@@ -592,7 +666,11 @@ function process(path, request, response) {
       var output = response.getWriter();
       try {
         var paths = ClientSideResourceManager.getPaths(lastSegment + "/scripts");
-        for each (var qualifiedPath in paths) {
+        for (var key in paths) {
+          if (!paths.hasOwnProperty(key)) {
+            continue;
+          }
+          var qualifiedPath = paths[key];
           var input = null;
           try {
             var url = qualifiedPath.module.getResource(qualifiedPath.path);
@@ -637,20 +715,33 @@ function process(path, request, response) {
         
         var styles = ClientSideResourceManager.getPaths(lastSegment + "/styles");
         var styleInjection = [];
-        for each (var qualifiedPath in styles) {
-          styleInjection.push(
-              '<link type="text/css" rel="stylesheet" href="' + qualifiedPath.fullPath.substring(1) + '" />');
+        for (var key in styles) {
+          if (styles.hasOwnProperty(key)) {
+            var qualifiedPath = styles[key];
+            var styleSource;
+            if (qualifiedPath.fullPath.substring(1).startsWith("extension/")) {
+                styleSource = qualifiedPath.fullPath.split("/")[2];
+            } else {
+                styleSource = "core";
+            }
+
+
+            styleInjection.push('@import url(' + qualifiedPath.fullPath.substring(1) + ') layer(' + styleSource + ');');
+          }
         }
-        context.styleInjection = styleInjection.join("\n");
+        context.styleInjection = '<style>@layer core;\n' + styleInjection.join("\n") + '</style>';
 
         if (bundle) {
           context.scriptInjection = '<script type="text/javascript" src="' + path + '-bundle.js"></script>';
         } else {
           var scripts = ClientSideResourceManager.getPaths(lastSegment + "/scripts");
           var scriptInjection = [];
-          for each (var qualifiedPath in scripts) {
-            scriptInjection.push(
-                '<script type="text/javascript" src="' + qualifiedPath.fullPath.substring(1) + '"></script>');
+          for (var key in scripts) {
+            if (scripts.hasOwnProperty(key)) {
+              var qualifiedPath = scripts[key];
+              scriptInjection.push(
+                  '<script type="text/javascript" src="' + qualifiedPath.fullPath.substring(1) + '"></script>');
+            }
           }
           context.scriptInjection = scriptInjection.join("\n");
         }
@@ -659,11 +750,19 @@ function process(path, request, response) {
           var encodings = [];
           
           var sortedCharsetMap = Packages.java.nio.charset.Charset.availableCharsets();
-          for each (var code in sortedCharsetMap.keySet().toArray()) {
+          var keySetArray = sortedCharsetMap.keySet().toArray();
+          for (var key in keySetArray) {
+            if (!keySetArray.hasOwnProperty(key)) {
+              continue;
+            }
+            var code = keySetArray[key];
             var charset = sortedCharsetMap.get(code);
+            var aliasesArray = charset.aliases().toArray();
             var aliases = [];
-            for each (var alias in charset.aliases().toArray()) {
-              aliases.push(alias);
+            for (var key1 in aliasesArray) {
+              if (aliasesArray.hasOwnProperty(key1)) {
+                aliases.push(aliasesArray[key1]);
+              }
             }
             
             encodings.push({
@@ -673,8 +772,7 @@ function process(path, request, response) {
             });
           }
           
-          context.encodingJson = butterfly.toJSONString(encodings);
-          context.defaultEncoding = butterfly.toJSONString(Packages.java.nio.charset.Charset.defaultCharset().name());
+          context.encodingJson = JSON.stringify(encodings);
         }
         
         send(request, response, path + ".vt", context);

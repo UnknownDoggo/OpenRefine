@@ -1,5 +1,3 @@
-package com.google.util.logging;
-
 /*
  * Copyright (c) Massachusetts Institute of Technology, 2007 
  *
@@ -31,101 +29,85 @@ package com.google.util.logging;
  *    Original code:  http://simile.mit.edu/repository/tracer/trunk/
  */
 
-import java.util.Calendar;
-import java.util.Date;
+package com.google.util.logging;
 
-import org.apache.log4j.Layout;
-import org.apache.log4j.spi.LoggingEvent;
+import java.nio.charset.Charset;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+
+import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.apache.logging.log4j.core.LogEvent;
+import org.apache.logging.log4j.core.config.Node;
+import org.apache.logging.log4j.core.config.plugins.Plugin;
+import org.apache.logging.log4j.core.config.plugins.PluginAttribute;
+import org.apache.logging.log4j.core.config.plugins.PluginFactory;
+import org.apache.logging.log4j.core.layout.AbstractStringLayout;
 
 /**
- * This is a special Log4j log formatter that is capable of reacting on special log messages
- * and 'indent' the logs accordingly. This is very useful to visually inspect a debug log
- * and see what calls what. An example of logs are "> method()" and "< method()" where > and <
- * are used to indicate respectively "entering" and "exiting".
+ * This is a special Log4j log formatter that is capable of reacting on special log messages and 'indent' the logs
+ * accordingly. This is very useful to visually inspect a debug log and see what calls what. An example of logs are
+ * "&gt; method()" and "&lt; method()" where &gt; and &lt; are used to indicate respectively "entering" and "exiting".
  */
-public class IndentingLayout extends Layout {
+@Plugin(name = "IndentingLayout", category = Node.CATEGORY, printObject = true)
+public class IndentingLayout extends AbstractStringLayout {
+
+    protected IndentingLayout(Charset charset) {
+        super(charset);
+    }
+
+    @PluginFactory
+    public static IndentingLayout createLayout(@PluginAttribute(value = "charset", defaultString = "UTF-8") Charset charset) {
+        return new IndentingLayout(charset);
+    }
 
     protected static final int CONTEXT_SIZE = 25;
-    protected static final long MAX_DELTA = 10000;
+    protected static final long MAX_DELTA_MILLIS = 10000;
 
-    protected Calendar calendar = Calendar.getInstance();
-    protected long previousTime = 0;
+    private static final String TIME_FORMAT = "hh:mm:ss.SSS";
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern(TIME_FORMAT)
+            .withZone(ZoneId.systemDefault());
+    protected Instant previousTime = null;
     protected int indentation = 0;
 
     @Override
-    public void activateOptions() {
-        // no options at this time
-    }
-
-    @Override
-    public String format(LoggingEvent event) {
-        String message = event.getRenderedMessage();
+    public String toSerializable(LogEvent event) {
+        String message = event.getMessage().getFormattedMessage();
         if (message == null) {
             return "";
         }
         if (message.length() < 2) {
             return message;
         }
-        
-        char leader = message.charAt(0);
-        char secondLeader = message.charAt(1);
-        if ((leader == '<') && (secondLeader == ' ') && (this.indentation > 0)) {
+
+        if (message.startsWith("< ") && (this.indentation > 0)) {
             this.indentation--;
         }
 
         // Reset buf
-        StringBuffer buf = new StringBuffer(256);
+        StringBuilder buf = new StringBuilder(256);
 
-        Date date = new Date();
-        long now = date.getTime();
-        calendar.setTime(date);
-
-        long delta = 0;
-        if (previousTime > 0) {
-            delta = now - previousTime;
+        // Event time is a log4j Instant, not Java instant, so convert it
+        org.apache.logging.log4j.core.time.Instant then = event.getInstant();
+        Instant now = Instant.ofEpochSecond(then.getEpochSecond(), then.getNanoOfSecond());
+        Duration delta = Duration.ZERO;
+        if (previousTime != null) {
+            delta = Duration.between(previousTime, now);
         }
         previousTime = now;
 
-//        if ((previousTime == 0) || (delta > MAX_DELTA)) {
+//        if ((previousTime == null) || (delta.toMillis() > MAX_DELTA_MILLIS)) {
 //            buf.append('\n');
-//            indentation = 0; // reset indentation after a while, as we might
-//            // have runaway/unmatched log entries
+//            indentation = 0; // reset indentation after a while, as we might have runaway/unmatched log entries
 //        }
 
-        int hour = calendar.get(Calendar.HOUR_OF_DAY);
-        if (hour < 10) {
-            buf.append('0');
-        }
-        buf.append(hour);
-        buf.append(':');
-
-        int mins = calendar.get(Calendar.MINUTE);
-        if (mins < 10) {
-            buf.append('0');
-        }
-        buf.append(mins);
-        buf.append(':');
-
-        int secs = calendar.get(Calendar.SECOND);
-        if (secs < 10) {
-            buf.append('0');
-        }
-        buf.append(secs);
-        buf.append('.');
-
-        int millis = (int) (now % 1000);
-        if (millis < 100) {
-            buf.append('0');
-        }
-        if (millis < 10) {
-            buf.append('0');
-        }
-        buf.append(millis);
+        buf.append(TIME_FORMATTER.format(now));
 
         buf.append(" [");
-        String context = ((String) event.getMDC("LogEvent"));
+        String context = event.getLoggerName();
         if (context == null) {
-            context = event.getLoggerName();
+            context = "<unknown logger>";
         }
         if (context.length() < CONTEXT_SIZE) {
             pad(buf, CONTEXT_SIZE - context.length(), ' ');
@@ -141,24 +123,22 @@ public class IndentingLayout extends Layout {
         buf.append(message);
 
         buf.append(" (");
-        buf.append(delta);
+        buf.append(delta.toMillis());
         buf.append("ms)\n");
 
-        if ((leader == '>') && (secondLeader == ' ')) {
+        if (message.startsWith("> ")) {
             indentation++;
+        }
+
+        if (event.getThrown() != null) {
+            buf.append(ExceptionUtils.getStackTrace(event.getThrown()));
         }
 
         return buf.toString();
     }
 
-    private void pad(StringBuffer buffer, int pads, char padchar) {
-        for (int i = 0; i < pads; i++) {
-            buffer.append(padchar);
-        }
+    private void pad(StringBuilder buffer, int pads, char padchar) {
+        buffer.repeat(String.valueOf(padchar), Math.max(0, pads));
     }
 
-    @Override
-    public boolean ignoresThrowable() {
-        return true;
-    }
 }

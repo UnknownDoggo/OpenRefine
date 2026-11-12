@@ -40,6 +40,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import com.fasterxml.jackson.core.JsonGenerator;
+
 import com.google.refine.browsing.util.ExpressionBasedRowEvaluable;
 import com.google.refine.browsing.util.NumericBinIndex;
 import com.google.refine.browsing.util.NumericBinRowIndex;
@@ -56,19 +57,19 @@ public class GetColumnsInfoCommand extends Command {
     @Override
     public void doGet(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        
+
         try {
             response.setCharacterEncoding("UTF-8");
             response.setHeader("Content-Type", "application/json");
 
             Project project = getProject(request);
-            
+
             JsonGenerator writer = ParsingUtilities.mapper.getFactory().createGenerator(response.getWriter());
 
             writer.writeStartArray();
             for (Column column : project.columnModel.columns) {
                 writer.writeStartObject();
-                    write(project, column, writer);
+                write(project, column, writer);
                 writer.writeEndObject();
             }
             writer.writeEndArray();
@@ -79,7 +80,7 @@ public class GetColumnsInfoCommand extends Command {
             respondException(response, e);
         }
     }
-    
+
     private NumericBinIndex getBinIndex(Project project, Column column) {
         String expression = "value";
         String key = "numeric-bin:" + expression;
@@ -96,7 +97,7 @@ public class GetColumnsInfoCommand extends Command {
         }
         return index;
     }
-    
+
     private void write(Project project, Column column, JsonGenerator writer) throws IOException {
         NumericBinIndex columnIndex = getBinIndex(project, column);
         if (columnIndex != null) {

@@ -33,7 +33,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 MenuSystem = {
   _layers: [],
-  _overlay: null
+  _overlay: null,
+  _hoverTimeout: null
 };
 
 MenuSystem.showMenu = function(elmt, onDismiss) {
@@ -41,7 +42,7 @@ MenuSystem.showMenu = function(elmt, onDismiss) {
     MenuSystem._overlay = $('<div>&nbsp;</div>')
     .addClass("menu-overlay")
     .appendTo(document.body)
-    .click(MenuSystem.dismissAll);
+    .on('click',MenuSystem.dismissAll);
   }
 
   elmt.css("z-index", 1010 + MenuSystem._layers.length).appendTo(document.body);
@@ -70,10 +71,10 @@ MenuSystem.dismissUntil = function(level) {
   for (var i = MenuSystem._layers.length - 1; i >= level; i--) {
     var layer = MenuSystem._layers[i];
 
-    $(document).unbind("keydown", layer.keyHandler);
+    $(document).off("keydown", layer.keyHandler);
 
     layer.elmt.remove();
-    layer.elmt.unbind();
+    layer.elmt.off();
     layer.onDismiss();
   }
   MenuSystem._layers = MenuSystem._layers.slice(0, level);
@@ -127,7 +128,7 @@ MenuSystem.createAndShowStandardMenu = function(items, elmt, options) {
   options = options || {
     horizontal: false
   };
-
+  
   var menu = MenuSystem.createMenu();
   if ("width" in options) {
     menu.width(options.width);
@@ -136,41 +137,52 @@ MenuSystem.createAndShowStandardMenu = function(items, elmt, options) {
   var createMenuItem = function(item) {
     if ("label" in item) {
       var menuItem = MenuSystem.createMenuItem().appendTo(menu);
+      let contentsDiv = $('<div></div>').text(item.label).appendTo(menuItem);
       if ("submenu" in item) {
-        menuItem.html(
-          '<table width="100%" cellspacing="0" cellpadding="0" class="menu-item-layout"><tr>' +
-          '<td>' + item.label + '</td>' +
-          '<td width="1%"><img src="images/right-arrow.png" /></td>' +
-          '</tr></table>'
-        );
-        menuItem.mouseenter(function() {
-          MenuSystem.dismissUntil(level);
+        menuItem.addClass('submenu');
+        menuItem.on('mouseenter click', function () {
+        clearTimeout(MenuSystem._hoverTimeout);
+        MenuSystem._hoverTimeout = setTimeout(function () {
+            MenuSystem.dismissUntil(level);
+            var options = {
+                horizontal: true
+            };
 
-          menuItem.addClass("menu-expanded");
-
-          var options = {
-            horizontal: true,
-            onDismiss: function() {
-              menuItem.removeClass("menu-expanded");
+            if ("width" in item) {
+                options.width = item.width;
             }
-          };
-          if ("width" in item) {
-            options.width = item.width;
-          }
+            MenuSystem.createAndShowStandardMenu(item.submenu, menuItem, options);
+        }, 300); 
+        });
 
-          MenuSystem.createAndShowStandardMenu(item.submenu, this, options);
-        });
       } else {
-        menuItem.html(item.label).click(function(evt) {
-          item.click.call(this, evt);
-          MenuSystem.dismissAll();
-        });
-        if ("tooltip" in item) {
-          menuItem.attr("title", item.tooltip);
+        if ("download" in item) {
+          menuItem.attr("href",item.download);
+          menuItem.attr("download","");
+        } else {
+          menuItem.on('click', function (evt) {
+            item.click.call(this, evt);
+            MenuSystem.dismissAll();
+          });
+          if ("tooltip" in item) {
+            menuItem.attr("title", item.tooltip);
+          }
+          menuItem.on('mouseenter click', function () {
+            clearTimeout(MenuSystem._hoverTimeout);
+            MenuSystem._hoverTimeout = setTimeout(function () {
+            MenuSystem.dismissUntil(level);
+            }, 300);
+          });
         }
-        menuItem.mouseenter(function() {
-          MenuSystem.dismissUntil(level);
-        });
+      }
+      if ("icon" in item) {
+        let img = $('<img />')
+          .attr('src', item.icon)
+          .addClass('menu-icon')
+          .attr('aria-hidden', 'true');
+        contentsDiv.prepend(' ');
+        contentsDiv.prepend(img);
+        contentsDiv.addClass('menu-item-icon-text');
       }
     } else if ("heading" in item) {
       $('<div></div>').addClass("menu-section").text(item.heading).appendTo(menu);
@@ -189,6 +201,8 @@ MenuSystem.createAndShowStandardMenu = function(items, elmt, options) {
   } else {
     MenuSystem.positionMenuAboveBelow(menu, $(elmt));
   }
+
+  menu.find(".menu-item").first().trigger('focus');
 
   return level;
 };

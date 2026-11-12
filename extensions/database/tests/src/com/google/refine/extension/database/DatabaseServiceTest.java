@@ -1,14 +1,11 @@
-package com.google.refine.extension.database;
 
+package com.google.refine.extension.database;
 
 import java.sql.Connection;
 import java.util.List;
 
-import com.google.refine.extension.database.sqlite.SQLiteDatabaseService;
 import org.testng.Assert;
 import org.testng.annotations.BeforeTest;
-import org.testng.annotations.Optional;
-import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
 import com.google.refine.extension.database.mariadb.MariaDBDatabaseService;
@@ -17,42 +14,24 @@ import com.google.refine.extension.database.model.DatabaseInfo;
 import com.google.refine.extension.database.model.DatabaseRow;
 import com.google.refine.extension.database.mysql.MySQLDatabaseService;
 import com.google.refine.extension.database.pgsql.PgSQLDatabaseService;
+import com.google.refine.extension.database.sqlite.SQLiteDatabaseService;
 
+public class DatabaseServiceTest extends DBExtensionTests {
 
-
-
-public class DatabaseServiceTest extends DBExtensionTests{
-    
     private DatabaseConfiguration testDbConfig;
     private String testTable;
-    
-  
+
     @BeforeTest
-    @Parameters({ "mySqlDbName", "mySqlDbHost", "mySqlDbPort", "mySqlDbUser", "mySqlDbPassword", "mySqlTestTable"})
-    public void beforeTest(@Optional(DEFAULT_MYSQL_DB_NAME) String mySqlDbName,  @Optional(DEFAULT_MYSQL_HOST) String mySqlDbHost, 
-           @Optional(DEFAULT_MYSQL_PORT)    String mySqlDbPort,     @Optional(DEFAULT_MYSQL_USER) String mySqlDbUser,
-           @Optional(DEFAULT_MYSQL_PASSWORD)  String mySqlDbPassword, @Optional(DEFAULT_TEST_TABLE)  String mySqlTestTable) {
-       
- 
-        testDbConfig = new DatabaseConfiguration();
-        testDbConfig.setDatabaseHost(mySqlDbHost);
-        testDbConfig.setDatabaseName(mySqlDbName);
-        testDbConfig.setDatabasePassword(mySqlDbPassword);
-        testDbConfig.setDatabasePort(Integer.parseInt(mySqlDbPort));
-        testDbConfig.setDatabaseType(MySQLDatabaseService.DB_NAME);
-        testDbConfig.setDatabaseUser(mySqlDbUser);
-        testDbConfig.setUseSSL(false);
-        
-        testTable = mySqlTestTable;
-       // DBExtensionTestUtils.initTestData(testDbConfig);
-        
+    public void beforeTest() {
+        testDbConfig = getMySQLDatabaseConfiguration();
+        testTable = getDatabaseTestTable("mySql", DEFAULT_TEST_TABLE);
+        // DBExtensionTestUtils.initTestData(testDbConfig);
+
         DatabaseService.DBType.registerDatabase(MariaDBDatabaseService.DB_NAME, MariaDBDatabaseService.getInstance());
         DatabaseService.DBType.registerDatabase(MySQLDatabaseService.DB_NAME, MySQLDatabaseService.getInstance());
         DatabaseService.DBType.registerDatabase(PgSQLDatabaseService.DB_NAME, PgSQLDatabaseService.getInstance());
-        
+
     }
-
-
 
     @Test
     public void testGetDatabaseUrl() {
@@ -61,32 +40,31 @@ public class DatabaseServiceTest extends DBExtensionTests{
         Assert.assertNotNull(dbUrl);
         Assert.assertEquals(dbUrl, DBExtensionTestUtils.getJDBCUrl(testDbConfig));
     }
-  
-    
-    @Test(groups = {"requiresPgSQL"})
+
+    @Test(groups = { "requiresPgSQL" })
     public void testGetPgSQLDBService() {
         DatabaseService dbService = DatabaseService.get(PgSQLDatabaseService.DB_NAME);
-        Assert.assertNotNull(dbService);  
+        Assert.assertNotNull(dbService);
         Assert.assertEquals(dbService.getClass(), PgSQLDatabaseService.class);
     }
-    
-    @Test(groups = {"requiresMySQL"})
+
+    @Test(groups = { "requiresMySQL" })
     public void testGetMySQLDBService() {
-       
+
         DatabaseService dbService = DatabaseService.get(MySQLDatabaseService.DB_NAME);
-        Assert.assertNotNull(dbService);  
+        Assert.assertNotNull(dbService);
         Assert.assertEquals(dbService.getClass(), MySQLDatabaseService.class);
     }
-    
-    @Test(groups = {"requiresMariaDB"})
+
+    @Test(groups = { "requiresMariaDB" })
     public void testGetMariaDBSQLDBService() {
-       
+
         DatabaseService dbService = DatabaseService.get(MariaDBDatabaseService.DB_NAME);
-        Assert.assertNotNull(dbService);  
+        Assert.assertNotNull(dbService);
         Assert.assertEquals(dbService.getClass(), MariaDBDatabaseService.class);
     }
 
-    @Test(groups = {"requiresSQLite"})
+    @Test(groups = { "requiresSQLite" })
     public void testGetSQLiteDBService() {
 
         DatabaseService dbService = DatabaseService.get(SQLiteDatabaseService.DB_NAME);
@@ -94,28 +72,28 @@ public class DatabaseServiceTest extends DBExtensionTests{
         Assert.assertEquals(dbService.getClass(), SQLiteDatabaseService.class);
     }
 
-    @Test(groups = {"requiresMySQL"})
+    @Test(groups = { "requiresMySQL" })
     public void testGetConnection() throws DatabaseServiceException {
-       DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
-       Connection conn = dbService.getConnection(testDbConfig);
-       Assert.assertNotNull(conn);
+        DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
+        Connection conn = dbService.getConnection(testDbConfig);
+        Assert.assertNotNull(conn);
     }
 
-    @Test(groups = {"requiresMySQL"})
+    @Test(groups = { "requiresMySQL" })
     public void testTestConnection() throws DatabaseServiceException {
         DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
         boolean result = dbService.testConnection(testDbConfig);
         Assert.assertEquals(result, true);
     }
 
-    @Test(groups = {"requiresMySQL"})
+    @Test(groups = { "requiresMySQL" })
     public void testConnect() throws DatabaseServiceException {
         DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
         DatabaseInfo databaseInfo = dbService.connect(testDbConfig);
         Assert.assertNotNull(databaseInfo);
     }
 
-    @Test(groups = {"requiresMySQL"})
+    @Test(groups = { "requiresMySQL" })
     public void testExecuteQuery() throws DatabaseServiceException {
         DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
         DatabaseInfo databaseInfo = dbService.testQuery(testDbConfig,
@@ -132,26 +110,52 @@ public class DatabaseServiceTest extends DBExtensionTests{
         Assert.assertEquals(limitQuery, "SELECT * FROM (SELECT * FROM " + testTable + ") data LIMIT " + 100 + " OFFSET " + 0 + ";");
     }
 
-    @Test(groups = {"requiresMySQL"})
+    @Test
+    public void testBuildCountQuery() {
+        DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
+        String basicSelectQuery = "SELECT * FROM " + testTable + ";";
+        String countQuery = dbService.buildCountQuery(basicSelectQuery);
+        Assert.assertNotNull(countQuery);
+        Assert.assertEquals(countQuery, "SELECT COUNT(*) FROM (SELECT * FROM " + testTable + ") AS TOTAL;");
+    }
+
+    @Test
+    public void testBuildCountQueryFromSpaciousBasicQuery() {
+        DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
+        String basicSelectQuery = " SELECT * FROM " + testTable + "  ;   ";
+        String countQuery = dbService.buildCountQuery(basicSelectQuery);
+        Assert.assertNotNull(countQuery);
+        Assert.assertEquals(countQuery, "SELECT COUNT(*) FROM (SELECT * FROM " + testTable + ") AS TOTAL;");
+    }
+
+    @Test(groups = { "requiresMySQL" })
     public void testGetColumns() throws DatabaseServiceException {
         List<DatabaseColumn> dbColumns;
-      
+
         DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
-        dbColumns = dbService.getColumns(testDbConfig,"SELECT * FROM " + testTable);
+        dbColumns = dbService.getColumns(testDbConfig, "SELECT * FROM " + testTable);
         Assert.assertNotNull(dbColumns);
-        
+
         int cols = dbColumns.size();
         Assert.assertEquals(cols, 10);
     }
 
-    @Test(groups = {"requiresMySQL"})
+    @Test(groups = { "requiresMySQL" })
     public void testGetRows() throws DatabaseServiceException {
         DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
         List<DatabaseRow> dbRows = dbService.getRows(testDbConfig,
                 "SELECT * FROM " + testTable);
-        
+
         Assert.assertNotNull(dbRows);
         Assert.assertEquals(dbRows.size(), 1);
     }
 
+    @Test(groups = { "requiresMySQL" })
+    public void testGetCount() {
+        DatabaseService dbService = DatabaseService.get(testDbConfig.getDatabaseType());
+        Integer count = dbService.getCount(testDbConfig, "SELECT * FROM " + testTable);
+
+        Assert.assertNotNull(count);
+        Assert.assertEquals(count, 1);
+    }
 }

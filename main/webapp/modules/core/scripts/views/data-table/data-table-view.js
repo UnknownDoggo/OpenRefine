@@ -35,7 +35,7 @@ function DataTableView(div) {
   this._div = div;
 
   this._gridPagesSizes = JSON.parse(Refine.getPreference("ui.browsing.pageSize", null));
-  this._gridPagesSizes = this._checkPaginationSize(this._gridPagesSizes, [ 5, 10, 25, 50 ]);
+  this._gridPagesSizes = this._checkPaginationSize(this._gridPagesSizes, [ 5, 10, 25, 50, 100, 500, 1000 ]);
   this._pageSize = ( this._gridPagesSizes[0] < 10 ) ? 10 : this._gridPagesSizes[0];
 
   this._showRecon = true;
@@ -44,10 +44,7 @@ function DataTableView(div) {
   this._columnHeaderUIs = [];
   this._shownulls = false;
 
-  this._currentPageNumber = 1;
-  this._showRows(0);
-  
-  this._refocusPageInput = false;
+  this._showRows({start: 0});
 }
 
 DataTableView._extenders = [];
@@ -84,9 +81,83 @@ DataTableView.prototype.resize = function() {
   tableContainer.height((tableContainerIntendedHeight - tableContainerVPadding) + "px");
 };
 
-DataTableView.prototype.update = function(onDone) {
-  this._currentPageNumber = 1;
-  this._showRows(0, onDone);
+// global state for the resizing of columns
+DataTableView.resizingState = {
+  dragging: false, // whether we are currently resizing any column
+  col: null, // the column being resized
+  columnName: null, // the name of the column being resized
+  originalWidth: 0, // the original width of the header when the dragging started
+  originalPosition: 0, // the original position of the cursor when the dragging started
+  moveListener: null, // the event listener for mouse move events
+  releaseListener: null, // the event listener for mouse release events
+};
+
+DataTableView.prototype._startResizing = function(columnIndex, clickEvent) {
+  var self = this;
+  var columnHeader = self._columnHeaderUIs[columnIndex];
+  clickEvent.preventDefault();
+  var state = DataTableView.resizingState;
+  state.dragging = true;
+  state.col = columnHeader._col;
+  state.columnName = columnHeader._column.name;
+  state.originalWidth = columnHeader._col.width();
+  state.originalPosition = clickEvent.pageX;
+  // for conversion from px to em
+  state.emFactor = parseFloat(getComputedStyle($(".data-table-container colgroup")[0]).fontSize);
+
+  state.col.width(state.originalWidth);
+  columnHeader._td.classList.add('resized-column');
+
+  $('body')
+      .on('mousemove', DataTableView.mouseMoveListener)
+      .on('mouseup', DataTableView.mouseReleaseListener);
+};
+
+// event handlers to react to mouse moves during resizing
+DataTableView.mouseMoveListener = function(e) {
+  var state = DataTableView.resizingState;
+  if (state.dragging) {
+    var totalMovement = e.pageX - state.originalPosition;
+    var newWidth = state.originalWidth + totalMovement;
+    if (state.col.css('min-width')) {
+      state.col.css('min-width', '');
+    }
+    state.col.width(newWidth);
+
+    e.preventDefault();
+  }
+};
+
+DataTableView.mouseReleaseListener = function(e) {
+  // only capture left clicks
+  if (e.button !== 0) {
+    return;
+  }
+  var state = DataTableView.resizingState;
+  if (state.dragging) {
+    var totalMovement = e.pageX - state.originalPosition;
+    var newWidth = state.originalWidth + totalMovement;
+    state.col.width((Math.floor(newWidth) / state.emFactor) + 'em');
+    state.dragging = false;
+    $('body')
+        .off('mousemove', DataTableView.mouseMoveListener)
+        .off('mouseup', DataTableView.mouseReleaseListener);
+  }
+  e.preventDefault();
+};
+
+DataTableView.prototype.update = function(onDone, preservePage) {
+  var paginationOptions = {};
+  if (preservePage) {
+    if (theProject.rowModel.start !== undefined) {
+      paginationOptions.start = theProject.rowModel.start;
+    } else {
+      paginationOptions.end = theProject.rowModel.end;
+    }
+  } else {
+    paginationOptions.start = 0;
+  }
+  this._showRows(paginationOptions, onDone);
 };
 
 DataTableView.prototype.render = function() {
@@ -94,6 +165,25 @@ DataTableView.prototype.render = function() {
 
   var oldTableDiv = this._div.find(".data-table-container");
   var scrollLeft = (oldTableDiv.length > 0) ? oldTableDiv[0].scrollLeft : 0;
+
+  // utility to convert px widths to em.
+  // The factor is computed only on demand (and once) because it might trigger some
+  // DOM rendering given that it uses computed styles
+  var emFactor = null;
+  var getEmFactor = function() {
+    if (emFactor === null) {
+      emFactor = parseFloat(getComputedStyle($(".data-table-container colgroup")[0]).fontSize);
+    }
+    return emFactor;
+  };
+  // store the current width of each column to be able to restore it later
+  this._div.find(".data-table-container col").each(function(index) {
+    var column = $(this);
+    if (column.data('name')) {
+      var width = column.width() / getEmFactor();
+      DataTableView.columnWidthCache.set(column.data('name'), width);
+    }
+  });
 
   var html = $(
     '<div class="viewpanel-header">' +
@@ -106,6 +196,7 @@ DataTableView.prototype.render = function() {
     '</div>' +
     '<div bind="dataTableContainer" class="data-table-container">' +
       '<table class="data-table">'+
+        '<colgroup bind="colGroup"></colgroup>'+
         '<thead bind="tableHeader" class="data-table-header">'+
         '</thead>'+
         '<tbody bind="table" class="data-table">'+
@@ -114,7 +205,6 @@ DataTableView.prototype.render = function() {
     '</div>'
   );
   var elmts = DOM.bind(html);
-  this._div.empty().append(html);
 
   ui.summaryBar.updateResultCount();
 
@@ -127,7 +217,7 @@ DataTableView.prototype.render = function() {
     if (value == ui.browsingEngine.getMode()) {
       a.addClass("selected");
     } else {
-      a.addClass("action").click(function(evt) {
+      a.addClass("action").on('click',function(evt) {
         ui.browsingEngine.setMode(value);
       });
     }
@@ -141,7 +231,8 @@ DataTableView.prototype.render = function() {
     this._renderSortingControls(elmts.sortingControls);
   }
 
-  this._renderDataTables(elmts.table[0], elmts.tableHeader[0]);
+  this._renderDataTables(elmts.table[0], elmts.tableHeader[0], elmts.colGroup);
+  this._div.empty().append(html);
 
   // show/hide null values in cells
   $(".data-table-null").toggle(self._shownulls);
@@ -156,10 +247,10 @@ DataTableView.prototype._renderSortingControls = function(sortingControls) {
 
   $('<a href="javascript:{}"></a>')
   .addClass("action")
-  .text($.i18n('core-views/sort') + " ")
-  .append($('<img>').attr("src", "../images/down-arrow.png"))
+  .text($.i18n('core-views/sort/single') + " ")
+  .append($('<img>').attr("src", "images/down-arrow.svg"))
   .appendTo(sortingControls)
-  .click(function() {
+  .on('click',function() {
     self._createSortingMenu(this);
   });
 };
@@ -167,57 +258,48 @@ DataTableView.prototype._renderSortingControls = function(sortingControls) {
 DataTableView.prototype._renderPagingControls = function(pageSizeControls, pagingControls) {
   var self = this;
 
-  self._lastPageNumber = Math.floor((theProject.rowModel.filtered - 1) / this._pageSize) + 1;
-
-  var from = (theProject.rowModel.start + 1);
-  var to = Math.min(theProject.rowModel.filtered, theProject.rowModel.start + theProject.rowModel.limit);
+  var rowIds = theProject.rowModel.rows.map(row => row.k);
+  if (theProject.rowModel.start !== undefined) {
+     rowIds.push(theProject.rowModel.start);
+  } else {
+     rowIds.push(theProject.rowModel.end - 1);
+  }
+  var minRowId = Math.min(... rowIds);
+  var maxRowId = Math.max(... rowIds);
 
   var firstPage = $('<a href="javascript:{}">&laquo; '+$.i18n('core-views/first')+'</a>').appendTo(pagingControls);
   var previousPage = $('<a href="javascript:{}">&lsaquo; '+$.i18n('core-views/previous')+'</a>').appendTo(pagingControls);
-  if (theProject.rowModel.start > 0) {
-    firstPage.addClass("action").click(function(evt) { self._onClickFirstPage(this, evt); });
-    previousPage.addClass("action").click(function(evt) { self._onClickPreviousPage(this, evt); });
+  if (theProject.rowModel.previousPageEnd !== undefined) {
+    firstPage.addClass("action").on('click',function(evt) { self._onClickFirstPage(this, evt); });
+    previousPage.addClass("action").on('click',function(evt) { self._onClickPreviousPage(this, evt); });
   } else {
     firstPage.addClass("inaction");
     previousPage.addClass("inaction");
   }
 
-  var pageControlsSpan = $('<span>').attr("id", "viewpanel-paging-current");
-  
-  var pageInputSize = 20 + (8 * ui.dataTableView._lastPageNumber.toString().length);
-  var currentPageInput = $('<input type="number">')
-    .change(function(evt) { self._onChangeGotoPage(this, evt); })
-    .keydown(function(evt) { self._onKeyDownGotoPage(this, evt); })
-    .attr("id", "viewpanel-paging-current-input")
+  var minRowInputSize = 20 + (8* theProject.rowModel.total.toString().length);
+  var minRowInput = $('<input type="number">')
+    .attr("id", "viewpanel-paging-current-min-row")
     .attr("min", 1)
-    .attr("max", self._lastPageNumber)
-    .attr("required", "required")
-    .val(self._currentPageNumber)
-    .css("width", pageInputSize +"px");
-    
-  pageControlsSpan.append($.i18n('core-views/goto-page', '<span id="currentPageInput" />', self._lastPageNumber));
-  pageControlsSpan.appendTo(pagingControls);
+    .attr("max", theProject.rowModel.total)
+    .css("width", minRowInputSize)
+    .val(minRowId + 1)
+    .on('change', function(evt) { self._onChangeMinRow(this, evt); })
+    .appendTo(pagingControls);
+  $('<span>').addClass("viewpanel-pagingcount").html(" - " + (maxRowId + 1) + " ").appendTo(pagingControls);
 
-  $('span#currentPageInput').replaceWith($(currentPageInput));
-  
-  if(self._refocusPageInput == true) { 
-    self._refocusPageInput = false;
-    var currentPageInputForFocus = $('input#viewpanel-paging-current-input');
-    currentPageInputForFocus.ready(function(evt) { setTimeout(() => { currentPageInputForFocus.focus(); }, 250); });
-  }
-  
   var nextPage = $('<a href="javascript:{}">'+$.i18n('core-views/next')+' &rsaquo;</a>').appendTo(pagingControls);
   var lastPage = $('<a href="javascript:{}">'+$.i18n('core-views/last')+' &raquo;</a>').appendTo(pagingControls);
-  if (theProject.rowModel.start + theProject.rowModel.limit < theProject.rowModel.filtered) {
-    nextPage.addClass("action").click(function(evt) { self._onClickNextPage(this, evt); });
-    lastPage.addClass("action").click(function(evt) { self._onClickLastPage(this, evt); });
+  if (theProject.rowModel.nextPageStart) {
+    nextPage.addClass("action").on('click',function(evt) { self._onClickNextPage(this, evt); });
+    lastPage.addClass("action").on('click',function(evt) { self._onClickLastPage(this, evt); });
   } else {
     nextPage.addClass("inaction");
     lastPage.addClass("inaction");
   }
 
   $('<span>'+$.i18n('core-views/show')+': </span>').appendTo(pageSizeControls);
-  
+
   var renderPageSize = function(index) {
     var pageSize = self._gridPagesSizes[index];
     var a = $('<a href="javascript:{}"></a>')
@@ -226,9 +308,9 @@ DataTableView.prototype._renderPagingControls = function(pageSizeControls, pagin
     if (pageSize == self._pageSize) {
       a.text(pageSize).addClass("selected");
     } else {
-      a.text(pageSize).addClass("action").click(function(evt) {
+      a.text(pageSize).addClass("action").on('click',function(evt) {
         self._pageSize = pageSize;
-        self.update();
+        self.update(undefined, true);
       });
     }
   };
@@ -263,7 +345,7 @@ DataTableView.prototype._checkPaginationSize = function(gridPageSize, defaultGri
   return newGridPageSize;
 };
 
-DataTableView.prototype._renderDataTables = function(table, tableHeader) {
+DataTableView.prototype._renderDataTables = function(table, tableHeader, colGroup) {
   var self = this;
 
   var columns = theProject.columnModel.columns;
@@ -282,6 +364,7 @@ DataTableView.prototype._renderDataTables = function(table, tableHeader) {
       for (var c = 0; c < columns.length; c++) {
         var column = columns[c];
         var th = tr.appendChild(document.createElement("th"));
+        $(th).attr('class', 'column-group-header');
         if (self._collapsedColumnNames.hasOwnProperty(column.name)) {
           $(th).html('&nbsp;');
         } else {
@@ -290,10 +373,11 @@ DataTableView.prototype._renderDataTables = function(table, tableHeader) {
             // See https://github.com/OpenRefine/OpenRefine/blob/master/main/src/com/google/refine/model/ColumnGroup.java
             // and https://github.com/OpenRefine/OpenRefine/tree/master/main/src/com/google/refine/importers/tree
             if (c == keys[k]) {
-              $('<img />').attr("src", "../images/down-arrow.png").appendTo(th);
+              $('<img />').attr("src", "images/down-arrow.svg").appendTo(th);
               break;
             }
           }
+          self._addResizingControls(th, c);
         }
       }
     }
@@ -355,37 +439,8 @@ DataTableView.prototype._renderDataTables = function(table, tableHeader) {
    *------------------------------------------------------------
    */
 
-  var trHead = tableHeader.insertRow(tableHeader.rows.length);
-  DOM.bind(
-      $(trHead.appendChild(document.createElement("th")))
-      .attr("colspan", "3")
-      .addClass("column-header")
-      .html(
-        '<div class="column-header-title">' +
-          '<a class="column-header-menu" bind="dropdownMenu"></a><span class="column-header-name">'+$.i18n('core-views/all')+'</span>' +
-        '</div>'
-      )
-  ).dropdownMenu.click(function() {
-    self._createMenuForAllColumns(this);
-  });
-  this._columnHeaderUIs = [];
-  var createColumnHeader = function(column, index) {
-    var th = trHead.appendChild(document.createElement("th"));
-    $(th).addClass("column-header").attr('title', column.name);
-    if (self._collapsedColumnNames.hasOwnProperty(column.name)) {
-      $(th).html("&nbsp;").click(function(evt) {
-        delete self._collapsedColumnNames[column.name];
-        self.render();
-      });
-    } else {
-      var columnHeaderUI = new DataTableColumnHeaderUI(self, column, index, th);
-      self._columnHeaderUIs.push(columnHeaderUI);
-    }
-  };
-
-  for (var i = 0; i < columns.length; i++) {
-    createColumnHeader(columns[i], i);
-  }
+  colGroup.empty();
+  self._renderTableHeader(tableHeader, colGroup);
 
   /*------------------------------------------------------------
    *  Data Cells
@@ -411,7 +466,8 @@ DataTableView.prototype._renderDataTables = function(table, tableHeader) {
         {
           onDone: function(o) {
             row.starred = newStarred;
-            renderRow(tr, r, row, even);
+            star.classList.remove(newStarred ? "data-table-star-off" : "data-table-star-on");
+            star.classList.add(newStarred ? "data-table-star-on" : "data-table-star-off");
           }
         },
         "json"
@@ -433,7 +489,8 @@ DataTableView.prototype._renderDataTables = function(table, tableHeader) {
         {
           onDone: function(o) {
             row.flagged = newFlagged;
-            renderRow(tr, r, row, even);
+            flag.classList.remove(newFlagged ? "data-table-flag-off" : "data-table-flag-on");
+            flag.classList.add(newFlagged ? "data-table-flag-on" : "data-table-flag-off");
           }
         },
         "json"
@@ -483,9 +540,102 @@ DataTableView.prototype._renderDataTables = function(table, tableHeader) {
   }
 };
 
-DataTableView.prototype._showRows = function(start, onDone) {
+// cache which remembers the set width of each column (used when the grid is re-rendered)
+DataTableView.columnWidthCache = new Map();
+
+DataTableView.prototype._renderTableHeader = function(tableHeader, colGroup) {
   var self = this;
-  Refine.fetchRows(start, this._pageSize, function() {
+  var columns = theProject.columnModel.columns;
+  var trHead = document.createElement('tr');
+  tableHeader.append(trHead);
+
+  // header for the first three columns (star, flag, row number)
+  DOM.bind(
+      $(trHead.appendChild(document.createElement("th")))
+      .attr("colspan", "3")
+      .addClass("column-header")
+      .html(
+        '<div class="column-header-title">' +
+          '<button class="column-header-menu" bind="dropdownMenu"></button><span class="column-header-name">'+$.i18n('core-views/all')+'</span>' +
+        '</div>'
+      )
+  ).dropdownMenu.on('click',function() {
+    self._createMenuForAllColumns(this);
+  });
+  $('<col>').attr('span', 3).appendTo(colGroup);
+
+  // headers for the normal columns
+  this._columnHeaderUIs = [];
+  var createColumnHeader = function(column, index) {
+    var th = trHead.appendChild(document.createElement("th"));
+    $(th).addClass("column-header").attr('title', column.name);
+    var col = $('<col>')
+        .attr('span', 1)
+        .data('name', column.name)
+        .appendTo(colGroup);
+    var cachedWidth = DataTableView.columnWidthCache.get(column.name);
+    if (cachedWidth !== undefined && !self._collapsedColumnNames.hasOwnProperty(column.name)) {
+      col.width(cachedWidth + 'em');
+    } else {
+      // Not set in CSS directly because the user needs to be able to override that by dragging.
+      // Set in px rather than in em because with em it can lead to a fractional width in pixels,
+      // which causes the right border not to display correctly. 
+      col.css('min-width', '50px');
+    }
+    if (self._collapsedColumnNames.hasOwnProperty(column.name)) {
+      DOM.bind( 
+        $(th)
+        .attr('title',$.i18n('core-views/expand', column.name))
+        .html("<button class='column-header-menu column-header-menu-expand' bind='expandColumn' ></button>")
+      ).expandColumn.on(
+        'click', function() {
+          delete self._collapsedColumnNames[column.name];
+          self.render();
+        }
+      )
+    } else {
+      var columnHeaderUI = new DataTableColumnHeaderUI(self, column, index, th, col);
+      self._columnHeaderUIs.push(columnHeaderUI);
+
+      self._addResizingControls(th, index);
+    }
+  };
+
+  for (var i = 0; i < columns.length; i++) {
+    createColumnHeader(columns[i], i);
+  }
+}
+
+DataTableView.prototype._addResizingControls = function(th, index) {
+  var self = this;
+  var columns = theProject.columnModel.columns;
+  var resizerLeft = $('<div></div>').addClass('column-header-resizer-left')
+        .appendTo(th);
+  resizerLeft.on('mousedown', function(e) {
+    // only capture left clicks
+    if (e.button !== 0) {
+      return;
+    }
+    self._startResizing(index, e);
+  });
+
+  // add resizing control for the previous column (if uncollapsed)
+  if (index > 0 && !self._collapsedColumnNames.hasOwnProperty(columns[index-1].name)) {
+    var resizerRight = $('<div></div>').addClass('column-header-resizer-right')
+          .appendTo(th);
+    resizerRight.on('mousedown', function(e) {
+      // only capture left clicks
+      if (e.button !== 0) {
+        return;
+      }
+      self._startResizing(index - 1, e);
+    });
+  }
+}
+
+DataTableView.prototype._showRows = function(paginationOptions, onDone) {
+  var self = this;
+  Refine.fetchRows(paginationOptions, this._pageSize, function() {
     self.render();
 
     if (onDone) {
@@ -494,60 +644,33 @@ DataTableView.prototype._showRows = function(start, onDone) {
   }, this._sorting);
 };
 
-DataTableView.prototype._onChangeGotoPage = function(elmt, evt) {
-  var gotoPageNumber = parseInt($('input#viewpanel-paging-current-input').val());
-  
-  if(typeof gotoPageNumber != "number" || isNaN(gotoPageNumber) || gotoPageNumber == "") { 
-    $('input#viewpanel-paging-current-input').val(this._currentPageNumber); 
-    return;
-  }
-  
-  if(gotoPageNumber > this._lastPageNumber) gotoPageNumber = this._lastPageNumber;
-  if(gotoPageNumber < 1) gotoPageNumber = 1;
-  
-  this._currentPageNumber = gotoPageNumber;
-  this._showRows((gotoPageNumber - 1) * this._pageSize);
-};
-
-DataTableView.prototype._onKeyDownGotoPage = function(elmt, evt) {
-  var keyDownCode = event.which;
-  
-  if([38, 40].indexOf(keyDownCode) == -1) return;
-  if(self._refocusPageInput == true) return; 
-
-  evt.preventDefault();
-  this._refocusPageInput = true;
-  
-  var newPageValue = $('input#viewpanel-paging-current-input')[0].value;
-  if(keyDownCode == 38) {  // Up arrow
-    if(newPageValue <= 1) return;
-    this._onClickPreviousPage(elmt, evt);
-  }
-    
-  if(keyDownCode == 40) {  // Down arrow
-    if(newPageValue >= this._lastPageNumber) return;
-    this._onClickNextPage(elmt, evt);
-  }
-};
-
 DataTableView.prototype._onClickPreviousPage = function(elmt, evt) {
-  this._currentPageNumber--;
-  this._showRows(theProject.rowModel.start - this._pageSize);
+  this._showRows({end: theProject.rowModel.previousPageEnd});
 };
 
 DataTableView.prototype._onClickNextPage = function(elmt, evt) {
-  this._currentPageNumber++;
-  this._showRows(theProject.rowModel.start + this._pageSize);
+  this._showRows({start: theProject.rowModel.nextPageStart});
 };
 
 DataTableView.prototype._onClickFirstPage = function(elmt, evt) {
-  this._currentPageNumber = 1;
-  this._showRows(0);
+  this._showRows({start: 0});
 };
 
 DataTableView.prototype._onClickLastPage = function(elmt, evt) {
-  this._currentPageNumber = this._lastPageNumber;
-  this._showRows((this._lastPageNumber - 1) * this._pageSize);
+  this._showRows({end: theProject.rowModel.totalRows});
+};
+
+DataTableView.prototype._onChangeMinRow = function(elmt, evt) {
+  var input = $('#viewpanel-paging-current-min-row');
+  var newMinRow = input.val();
+  if (newMinRow <= 0) {
+    newMinRow = 1;
+    input.val(newMinRow);
+  } else if (newMinRow > theProject.rowModel.total) {
+    newMinRow = theProject.rowModel.total;
+    input.val(theProject.rowModel.total);
+  }
+  this._showRows({start: newMinRow - 1});
 };
 
 DataTableView.prototype._getSortingCriteriaCount = function() {
@@ -605,6 +728,7 @@ DataTableView.prototype._addSortingCriterion = function(criterion, alone) {
         .replace("$EXPRESSION_PREVIEW_WIDGET$", ExpressionPreviewDialog.generateWidgetHtml()));
 
     var elmts = DOM.bind(frame);
+    elmts.dialogHeader.text($.i18n('core-views/transform/header'));
     elmts.or_views_errorOn.text($.i18n('core-views/on-error'));
     elmts.or_views_keepOr.text($.i18n('core-views/keep-or'));
     elmts.or_views_setBlank.text($.i18n('core-views/set-blank'));
@@ -617,8 +741,8 @@ DataTableView.prototype._addSortingCriterion = function(criterion, alone) {
     var level = DialogSystem.showDialog(frame);
     var dismiss = function() { DialogSystem.dismissUntil(level - 1); };
 
-    elmts.cancelButton.click(dismiss);
-    elmts.okButton.click(function() {
+    elmts.cancelButton.on('click',dismiss);
+    elmts.okButton.on('click',function() {
         new ExpressionColumnDialog(
                 previewWidget.getExpression(true),
                 $('input[name="text-transform-dialog-onerror-choice"]:checked')[0].value,
@@ -653,6 +777,76 @@ DataTableView.prototype._createMenuForAllColumns = function(elmt) {
             }
         },
     {},
+    {
+      id: "core/common-transforms",
+      label: $.i18n('core-views/edit-all-columns'),
+      submenu: [
+        {
+          id: "core/trim-whitespace",
+          label: $.i18n('core-views/trim-all'),
+          click: function() { new commonTransformDialog("value.trim()", "core-views/trim-all/header"); }
+        },
+        {
+          id: "core/collapse-whitespace",
+          label: $.i18n('core-views/collapse-white'),
+          click: function() { new commonTransformDialog("value.replace(/\\s+/,' ')", "core-views/collapse-white/header"); }
+        },
+        {},
+        {
+          id: "core/unescape-html-entities",
+          label: $.i18n('core-views/unescape-html'),
+          click: function() { new commonTransformDialog("value.unescape('html')","core-views/unescape-html/header" ); }
+        },
+        {
+          id: "core/replace-smartquotes",
+          label: $.i18n('core-views/replace-smartquotes'),
+          click: function() { new commonTransformDialog("value.replace(/[\u2018\u2019\u201A\u201B\u2039\u203A\u201A]/,\"\\\'\").replace(/[\u201C\u201D\u00AB\u00BB\u201E]/,\"\\\"\")", "core-views/replace-smartquotes/header"); }
+        },
+        {},
+        {
+          id: "core/to-titlecase",
+          label: $.i18n('core-views/titlecase'),
+          click: function() { new commonTransformDialog("value.toTitlecase()", "core-views/titlecase/header"); }
+        },
+        {
+          id: "core/to-uppercase",
+          label: $.i18n('core-views/uppercase'),
+          click: function() { new commonTransformDialog("value.toUppercase()","core-views/uppercase/header" ); }
+        },
+        {
+          id: "core/to-lowercase",
+          label: $.i18n('core-views/lowercase'),
+          click: function() { new commonTransformDialog("value.toLowercase()", "core-views/lowercase/header"); }
+        },
+        {},
+        {
+          id: "core/to-number",
+          label: $.i18n('core-views/to-number'),
+          click: function() { new commonTransformDialog("value.toNumber()","core-views/to-number/header" ); }
+        },
+        {
+          id: "core/to-date",
+          label: $.i18n('core-views/to-date'),
+          click: function() { new commonTransformDialog("value.toDate()","core-views/to-date/header" ); }
+        },
+        {
+          id: "core/to-text",
+          label: $.i18n('core-views/to-text'),
+          click: function() { new commonTransformDialog("value.toString()","core-views/to-text/header" ); }
+        },
+        {},
+        {
+          id: "core/to-blank",
+          label: $.i18n('core-views/blank-out'),
+          click: function() { new commonTransformDialog("null", "core-views/blank-out/header"); }
+        },
+        {
+          id: "core/to-empty",
+          label: $.i18n('core-views/blank-out-empty'),
+          click: function() { new commonTransformDialog("\"\"","core-views/blank-out-empty/header" ); }
+        }
+      ]
+    },
     {
       label: $.i18n('core-views/facet'),
       id: "core/facets",
@@ -781,6 +975,29 @@ DataTableView.prototype._createMenuForAllColumns = function(elmt) {
     },
     {},
     {
+      label: $.i18n('core-views/add-rows'),
+      id: 'core/add-rows',
+      width: "200px",
+      submenu: [
+        {
+          label: $.i18n("core-views/add-rows/prepend-blank"),
+          id: 'core/prepend-blank-row',
+          click: AddRowsDialog.prependBlankRow
+        },
+        {
+          label: $.i18n("core-views/add-rows/append-blank"),
+          id: "core/append-blank-row",
+          click: AddRowsDialog.appendBlankRow
+        },
+        {
+          label: $.i18n("core-views/add-rows/open-dialog"),
+          id: "core/insert-blank-rows",
+          click: AddRowsDialog.initDialog
+        }
+      ]
+    },
+    {},
+    {
       label: $.i18n('core-views/edit-rows'),
       id: "core/edit-rows",
       width: "200px",
@@ -788,40 +1005,62 @@ DataTableView.prototype._createMenuForAllColumns = function(elmt) {
         {
           label: $.i18n('core-views/star-rows'),
           id: "core/star-rows",
+          icon: "images/operations/row-star.svg",
           click: function() {
-            Refine.postCoreProcess("annotate-rows", { "starred" : "true" }, null, { rowMetadataChanged: true });
+            Refine.postCoreProcess("annotate-rows", { "starred" : "true" }, null, { rowMetadataChanged: true, rowIdsPreserved: true, recordIdsPreserved: true });
           }
         },
         {
           label: $.i18n('core-views/unstar-rows'),
           id: "core/unstar-rows",
+          icon: "images/operations/row-unstar.svg",
           click: function() {
-            Refine.postCoreProcess("annotate-rows", { "starred" : "false" }, null, { rowMetadataChanged: true });
+            Refine.postCoreProcess("annotate-rows", { "starred" : "false" }, null, { rowMetadataChanged: true, rowIdsPreserved: true, recordIdsPreserved: true });
           }
         },
         {},
         {
           label: $.i18n('core-views/flag-rows'),
           id: "core/flag-rows",
+          icon: "images/operations/row-flag.svg",
           click: function() {
-            Refine.postCoreProcess("annotate-rows", { "flagged" : "true" }, null, { rowMetadataChanged: true });
+            Refine.postCoreProcess("annotate-rows", { "flagged" : "true" }, null, { rowMetadataChanged: true, rowIdsPreserved: true, recordIdsPreserved: true });
           }
         },
         {
           label: $.i18n('core-views/unflag-rows'),
           id: "core/unflag-rows",
+          icon: "images/operations/row-unflag.svg",
           click: function() {
-            Refine.postCoreProcess("annotate-rows", { "flagged" : "false" }, null, { rowMetadataChanged: true });
+            Refine.postCoreProcess("annotate-rows", { "flagged" : "false" }, null, { rowMetadataChanged: true, rowIdsPreserved: true, recordIdsPreserved: true });
           }
         },
         {},
         {
           label: $.i18n('core-views/remove-matching'),
           id: "core/remove-rows",
+          icon: "images/operations/delete.svg",
           click: function() {
             Refine.postCoreProcess("remove-rows", {}, null, { rowMetadataChanged: true });
           }
-        }
+        },
+        {
+          label: $.i18n('core-views/keep-only-matching'),
+          id: "core/keep-only-matching",
+          icon: "images/operations/row-keep-matched.svg",
+          click: function() {
+            Refine.postCoreProcess("keep-matching-rows", {}, null, { rowMetadataChanged: true });
+          }
+        },
+        {},
+        {
+          label: $.i18n('core-views/remove-duplicates'),
+          id: "core/remove-duplicates",
+          icon: "images/operations/row-duplicate-removal.svg",
+          click: function() {
+            new RemoveDuplicateRowsDialog();
+          }
+        },
       ]
     },
     {
@@ -830,8 +1069,9 @@ DataTableView.prototype._createMenuForAllColumns = function(elmt) {
       width: "200px",
       submenu: [
         {
-          label: $.i18n('core-views/reorder-remove')+"...",
+          label: $.i18n('core-views/reorder-remove'),
           id: "core/reorder-columns",
+          icon: "images/operations/column-reorder.svg",
           click: function() {
             new ColumnReorderingDialog();
           }
@@ -840,12 +1080,28 @@ DataTableView.prototype._createMenuForAllColumns = function(elmt) {
         {
           label: $.i18n('core-views/fill-down'),
           id: "core/fill-down",
-          click: doAllFillDown
+          icon: "images/operations/fill-down.svg",
+          click: function () {
+            if (self._getSortingCriteriaCount() > 0) {
+                self._createPendingSortWarningDialog(doAllFillDown);
+            }
+            else {
+                doAllFillDown();
+            }
+          }
         },
         {
           label: $.i18n('core-views/blank-down'),
           id: "core/blank-down",
-          click: doAllBlankDown
+          icon: "images/operations/blank-down.svg",
+          click: function () {
+            if (self._getSortingCriteriaCount() > 0) {
+                self._createPendingSortWarningDialog(doAllBlankDown);
+            }
+            else {
+                doAllBlankDown();
+            }
+          }
         }
       ]
     },
@@ -1046,4 +1302,30 @@ DataTableView.promptExpressionOnVisibleRows = function(column, title, expression
     expression,
     onDone
   );
+};
+
+//This function takes a function as a parameter and creates a dialog window
+//If the ok button is pressed, the function is executed
+//If the cancel button is pressed instead, the window is dismissed and the function is not executed
+DataTableView.prototype._createPendingSortWarningDialog = function(func) {
+  var frame = $(DOM.loadHTML("core", "scripts/views/data-table/warn-of-pending-sort.html"));
+  var elmts = DOM.bind(frame);
+
+  elmts.or_views_warning.text($.i18n('core-views/warn-of-pending-sort'));
+  elmts.dialogHeader.text($.i18n('core-views/warning'));
+  elmts.okButton.html($.i18n('core-buttons/ok'));
+  elmts.cancelButton.text($.i18n('core-buttons/cancel'));
+
+  var level = DialogSystem.showDialog(frame);
+  var dismiss = function() { DialogSystem.dismissLevel(level - 1); };
+
+  elmts.cancelButton.on('click', function () {
+     dismiss();
+  });
+
+  elmts.okButton.on('click', function () {
+     func();
+     dismiss();
+  });
+
 };

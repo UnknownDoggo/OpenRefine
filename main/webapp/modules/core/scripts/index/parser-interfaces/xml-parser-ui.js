@@ -95,19 +95,22 @@ Refine.XmlParserUI.prototype.getOptions = function() {
   options.includeFileSources = this._optionContainerElmts.includeFileSourcesCheckbox[0].checked;
   options.includeArchiveFileName = this._optionContainerElmts.includeArchiveFileCheckbox[0].checked;
 
+  options.disableAutoPreview = this._optionContainerElmts.disableAutoPreviewCheckbox[0].checked;
+
   return options;
 };
 
 Refine.XmlParserUI.prototype._initialize = function() {
   var self = this;
 
-  this._optionContainer.unbind().empty().html(
+  this._optionContainer.off().empty().html(
       DOM.loadHTML("core", "scripts/index/parser-interfaces/xml-parser-ui.html"));
   this._optionContainerElmts = DOM.bind(this._optionContainer);
-  this._optionContainerElmts.previewButton.click(function() { self._updatePreview(); });
+  this._optionContainerElmts.previewButton.on('click',function() { self._updatePreview(); });
 
   this._optionContainerElmts.pickRecordElementsButton.html($.i18n('core-buttons/pick-record'));
   this._optionContainerElmts.previewButton.html($.i18n('core-buttons/update-preview'));
+  $('#or-disable-auto-preview').text($.i18n('core-index-parser/disable-auto-preview'));
   $('#or-import-rows').text($.i18n('core-index-parser/rows-data'));
   $('#or-import-load').text($.i18n('core-index-parser/load-at-most'));
   $('#or-import-preserve').text($.i18n('core-index-parser/preserve-empty'));
@@ -135,22 +138,30 @@ Refine.XmlParserUI.prototype._initialize = function() {
   if (this._config.includeArchiveFileName) {
     this._optionContainerElmts.includeArchiveFileCheckbox.prop("checked", true);
   }
-  this._optionContainerElmts.pickRecordElementsButton.click(function() {
+  this._optionContainerElmts.pickRecordElementsButton.on('click',function() {
     self._config.recordPath = undefined;
     self._showPickRecordElementsUI();
   });
 
+  if (this._config.disableAutoPreview) {
+    this._optionContainerElmts.disableAutoPreviewCheckbox.prop('checked', true);
+  }
+
+  // If disableAutoPreviewCheckbox is not checked, we will schedule an automatic update
   var onChange = function() {
-    self._scheduleUpdatePreview();
+    if (!self._optionContainerElmts.disableAutoPreviewCheckbox[0].checked)
+    {
+        self._scheduleUpdatePreview();
+    }
   };
-  this._optionContainer.find("input").bind("change", onChange);
-  this._optionContainer.find("select").bind("change", onChange);
+  this._optionContainer.find("input").on("change", onChange);
+  this._optionContainer.find("select").on("change", onChange);
 };
 
 Refine.XmlParserUI.prototype._showPickRecordElementsUI = function() {
   var self = this;
 
-  this._dataContainer.unbind().empty().html(
+  this._dataContainer.off().empty().html(
       DOM.loadHTML("core", "scripts/index/parser-interfaces/xml-parser-select-ui.html"));
 
   $('#or-import-clickXML').text($.i18n('core-index-parser/click-xml'));
@@ -221,16 +232,16 @@ Refine.XmlParserUI.prototype._showPickRecordElementsUI = function() {
         return true;
       };
       div.attr('title', '/' + path.join('/'))
-      .bind('mouseover', function(evt) {
+      .on('mouseover', function(evt) {
         if (hittest(evt)) {
           elmts.domContainer.find('.highlight').removeClass('highlight');
           div.addClass('highlight');
         }
       })
-      .bind('mouseout', function(evt) {
+      .on('mouseout', function(evt) {
         div.removeClass('highlight');
       })
-      .click(function(evt) {
+      .on('click',function(evt) {
         if (hittest(evt)) {
           self._setRecordPath(path);
         }
@@ -280,7 +291,10 @@ Refine.XmlParserUI.prototype._updatePreview = function() {
       self._controller.getPreviewData(function(projectData) {
         self._progressContainer.hide();
 
-        new Refine.PreviewTable(projectData, self._dataContainer.unbind().empty());
+    	  if (projectData["rowModel"]["rows"].length == 0) {
+		      alert($.i18n('core-index-import/load-xml-rows-error'));
+	      }	 
+        new Refine.PreviewTable(projectData, self._dataContainer.off().empty());
       }, 20);
     }
   });

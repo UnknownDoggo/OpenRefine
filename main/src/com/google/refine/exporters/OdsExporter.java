@@ -39,12 +39,12 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Properties;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.odftoolkit.odfdom.doc.OdfSpreadsheetDocument;
 import org.odftoolkit.odfdom.doc.table.OdfTable;
 import org.odftoolkit.odfdom.doc.table.OdfTableCell;
 import org.odftoolkit.odfdom.doc.table.OdfTableRow;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.google.refine.ProjectManager;
 import com.google.refine.browsing.Engine;
 import com.google.refine.model.Project;
@@ -65,17 +65,32 @@ public class OdsExporter implements StreamExporter {
         try {
             odfDoc = OdfSpreadsheetDocument.newSpreadsheetDocument();
         } catch (Exception e) {
-            throw new IOException("Failed to create spreadsheet",e);
+            throw new IOException("Failed to create spreadsheet", e);
         }
-        
+
         TabularSerializer serializer = new TabularSerializer() {
+
             OdfTable table;
-            //int rowCount = 0;
-            
+            // int rowCount = 0;
+            int rowBeforeHeader = 0;
+
             @Override
             public void startFile(JsonNode options) {
                 table = OdfTable.newTable(odfDoc);
-                table.setTableName(ProjectManager.singleton.getProjectMetadata(project.id).getName());
+                String tableName = ProjectManager.singleton.getProjectMetadata(project.id).getName();
+
+                // the ODF document might already contain some other tables
+                try {
+                    table.setTableName(tableName);
+                } catch (IllegalArgumentException e) {
+                    // there is already a table with that name
+                    table = odfDoc.getTableByName(tableName);
+                }
+                // delete any other table which has another name
+                odfDoc.getTableList().stream()
+                        .filter(table -> !table.getTableName().equals(tableName))
+                        .forEach(OdfTable::remove);
+                rowBeforeHeader = table.getRowCount();
             }
 
             @Override
@@ -85,8 +100,8 @@ public class OdsExporter implements StreamExporter {
             @Override
             public void addRow(List<CellData> cells, boolean isHeader) {
                 OdfTableRow r = table.appendRow();
-                //rowCount++;
-                
+                // rowCount++;
+
                 for (int i = 0; i < cells.size(); i++) {
                     OdfTableCell c = r.getCellByIndex(i); // implicitly creates cell
                     CellData cellData = cells.get(i);
@@ -98,7 +113,7 @@ public class OdsExporter implements StreamExporter {
                         } else if (v instanceof Boolean) {
                             c.setBooleanValue(((Boolean) v).booleanValue());
                         } else if (v instanceof OffsetDateTime) {
-                            OffsetDateTime odt = (OffsetDateTime)v;
+                            OffsetDateTime odt = (OffsetDateTime) v;
                             c.setDateValue(ParsingUtilities.offsetDateTimeToCalendar(odt));
                         } else {
                             c.setStringValue(cellData.text);
@@ -109,16 +124,21 @@ public class OdsExporter implements StreamExporter {
                         }
                     }
                 }
+                if (rowBeforeHeader != 0) { // avoid the api change the default values again
+                    int nowRows = table.getRowCount();
+                    table.removeRowsByIndex(0, rowBeforeHeader);
+                    rowBeforeHeader -= nowRows - table.getRowCount();
+                }
             }
         };
-        
+
         CustomizableTabularExporterUtilities.exportRows(
                 project, engine, params, serializer);
-        
+
         try {
             odfDoc.save(outputStream);
         } catch (Exception e) {
-            throw new IOException("Error saving spreadsheet",e);
+            throw new IOException("Error saving spreadsheet", e);
         }
         outputStream.flush();
     }

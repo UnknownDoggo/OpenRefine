@@ -41,30 +41,31 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.commands.Command;
 import com.google.refine.grel.Control;
 import com.google.refine.grel.ControlFunctionRegistry;
 import com.google.refine.grel.Function;
 
 public class GetExpressionLanguageInfoCommand extends Command {
-    
-    public static class LanguageInfo  {
-        
+
+    public static class LanguageInfo {
+
         @JsonProperty("functions")
         Map<String, Function> functions;
         @JsonProperty("controls")
         Map<String, Control> controls;
-        
+
         public LanguageInfo() {
             functions = ControlFunctionRegistry.getFunctionMap();
             controls = ControlFunctionRegistry.getControlMap();
         }
     }
-    
+
     @Override
     public void doGet(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
-        
+
         try {
             respondJSON(response, new LanguageInfo());
         } catch (Exception e) {

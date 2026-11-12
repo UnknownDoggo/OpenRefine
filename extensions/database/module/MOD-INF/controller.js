@@ -53,6 +53,8 @@ function registerCommands() {
   RS.registerCommand(module, "test-connect", Packages.com.google.refine.extension.database.cmd.TestConnectCommand());
   RS.registerCommand(module, "connect", Packages.com.google.refine.extension.database.cmd.ConnectCommand());
   RS.registerCommand(module, "saved-connection", Packages.com.google.refine.extension.database.cmd.SavedConnectionCommand());
+  // Deprecated: ExecuteQueryCommand is currently unused and may be removed in a future release.
+  // Kept registered as command/database/execute-query for backward compatibility.
   RS.registerCommand(module, "execute-query", Packages.com.google.refine.extension.database.cmd.ExecuteQueryCommand());
   RS.registerCommand(module, "test-query", Packages.com.google.refine.extension.database.cmd.TestQueryCommand());
   logger.trace("Database Extension Command Registration done!!");
@@ -93,8 +95,8 @@ function init() {
     "index/scripts",
     module,
     [
-      "scripts/index/jquery.contextMenu.min.js",
-      "scripts/index/jquery.ui.position.min.js",
+      "scripts/index/jquery.contextMenu.js",
+      "scripts/index/jquery.ui.position.js",
       "scripts/database-extension.js",
       "scripts/index/database-import-controller.js",
       "scripts/index/database-source-ui.js"
@@ -106,9 +108,7 @@ function init() {
     module,
     [
       "styles/jquery.contextMenu.css",
-        "styles/pure.css",
-        "styles/bootstrap.css",
-      "styles/database-import.less"
+      "styles/database-import.css"
 
     ]
   );

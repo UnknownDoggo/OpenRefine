@@ -26,6 +26,7 @@
  * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+
 package com.google.refine.extension.database;
 
 import java.sql.Connection;
@@ -33,7 +34,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.google.refine.extension.database.sqlite.SQLiteDatabaseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,15 +43,16 @@ import com.google.refine.extension.database.model.DatabaseInfo;
 import com.google.refine.extension.database.model.DatabaseRow;
 import com.google.refine.extension.database.mysql.MySQLDatabaseService;
 import com.google.refine.extension.database.pgsql.PgSQLDatabaseService;
+import com.google.refine.extension.database.sqlite.SQLiteDatabaseService;
 
 public abstract class DatabaseService {
 
     private static final Logger logger = LoggerFactory.getLogger("DatabaseService");
-    
-    
+
     public static class DBType {
-        private static Map<String, DatabaseService> databaseServiceMap = new HashMap<String, DatabaseService>();
-        
+
+        private static final Map<String, DatabaseService> databaseServiceMap = new HashMap<>();
+
         static {
             try {
 
@@ -66,18 +67,18 @@ public abstract class DatabaseService {
         }
 
         public static void registerDatabase(String name, DatabaseService db) {
-              
+
             if (!databaseServiceMap.containsKey(name)) {
-                //throw new DatabaseServiceException(name + " cannot be registered. Database Type already exists");
+                // throw new DatabaseServiceException(name + " cannot be registered. Database Type already exists");
                 databaseServiceMap.put(name, db);
                 logger.info(String.format("Registered %s Database", name));
-            }else {
-                if(logger.isDebugEnabled()) {
+            } else {
+                if (logger.isDebugEnabled()) {
                     logger.debug(name + " Database Type already exists");
                 }
-               
+
             }
-       
+
         }
 
         public static DatabaseService getJdbcServiceFromType(String name) {
@@ -85,7 +86,7 @@ public abstract class DatabaseService {
         }
 
     }
-    
+
     protected String getDatabaseUrl(DatabaseConfiguration dbConfig) {
         int port = dbConfig.getDatabasePort();
         return "jdbc:" + dbConfig.getDatabaseType() + "://" + dbConfig.getDatabaseHost()
@@ -94,63 +95,101 @@ public abstract class DatabaseService {
 
     /**
      * get Database
+     * 
      * @param dbType
      * @return
      */
     public static DatabaseService get(String dbType) {
         logger.debug("get called on DatabaseService with, {}", dbType);
         DatabaseService databaseService = DatabaseService.DBType.getJdbcServiceFromType(dbType.toLowerCase());
-        
+
         logger.debug("DatabaseService found: {}", databaseService.getClass());
         return databaseService;
-       
+
     }
-    
-    
-    //Database Service APIs
+
+    // Database Service APIs
     public abstract Connection getConnection(DatabaseConfiguration dbConfig) throws DatabaseServiceException;
-    
+
     public abstract boolean testConnection(DatabaseConfiguration dbConfig) throws DatabaseServiceException;
 
-    public abstract DatabaseInfo connect(DatabaseConfiguration dbConfig) throws  DatabaseServiceException;
-    
+    public abstract DatabaseInfo connect(DatabaseConfiguration dbConfig) throws DatabaseServiceException;
+
     public abstract DatabaseInfo executeQuery(DatabaseConfiguration dbConfig, String query) throws DatabaseServiceException;
-    
+
     public abstract DatabaseInfo testQuery(DatabaseConfiguration dbConfig, String query) throws DatabaseServiceException;
 
     public String buildLimitQuery(Integer limit, Integer offset, String query) {
-    	if(logger.isDebugEnabled()) {
-            logger.info( "<<< original input query::{} >>>" , query );
+        if (logger.isDebugEnabled()) {
+            logger.info("<<< original input query::{} >>>", query);
         }
-       
+
         final int len = query.length();
-        String parsedQuery = len > 0 && query.endsWith(";") ?  query.substring(0, len - 1) : query;
-               
-        
+        String parsedQuery = len > 0 && query.endsWith(";") ? query.substring(0, len - 1) : query;
+
         StringBuilder sb = new StringBuilder();
         sb.append("SELECT * FROM (");
         sb.append(parsedQuery);
         sb.append(") data");
-        
-        if(limit != null) {
+
+        if (limit != null) {
             sb.append(" LIMIT" + " " + limit);
         }
-        
-        if(offset != null) {
+
+        if (offset != null) {
             sb.append(" OFFSET" + " " + offset);
         }
         sb.append(";");
         String parsedQueryOut = sb.toString();
-        
-        if(logger.isDebugEnabled()) {
-            logger.info( "<<<Final input query::{} >>>" , parsedQueryOut );
+
+        if (logger.isDebugEnabled()) {
+            logger.info("<<<Final input query::{} >>>", parsedQueryOut);
         }
-        
+
         return parsedQueryOut;
     }
-    
+
+    String buildCountQuery(String query) {
+        if (logger.isDebugEnabled()) {
+            logger.info("<<< original input query::{} >>>", query);
+        }
+
+        String trimmedQuery = query.trim();
+        final int len = trimmedQuery.length();
+        String parsedQuery = trimmedQuery.endsWith(";") ? trimmedQuery.substring(0, len - 1) : trimmedQuery;
+
+        String parsedQueryOut = String.format("SELECT COUNT(*) FROM (%s) AS TOTAL;", parsedQuery.trim());
+
+        if (logger.isDebugEnabled()) {
+            logger.info("<<<Final input query::{} >>>", parsedQueryOut);
+        }
+
+        return parsedQueryOut;
+    }
+
+    Integer getCount(DatabaseConfiguration dbConfig, String query) {
+        String countQuery = buildCountQuery(query);
+
+        try {
+            List<DatabaseRow> dbRows = getRows(dbConfig, countQuery);
+
+            if (dbRows != null && !dbRows.isEmpty()) {
+                DatabaseRow row = dbRows.get(0);
+                List<String> rowValues = row.getValues();
+
+                if (rowValues != null && !rowValues.isEmpty()) {
+                    return Integer.parseInt(rowValues.get(0));
+                }
+            }
+        } catch (DatabaseServiceException | NumberFormatException e) {
+            logger.error("Error when retrieving count from db: {}", e.getMessage());
+        }
+
+        return null;
+    }
+
     public abstract List<DatabaseColumn> getColumns(DatabaseConfiguration dbConfig, String query) throws DatabaseServiceException;
-    
+
     public abstract List<DatabaseRow> getRows(DatabaseConfiguration dbConfig, String query) throws DatabaseServiceException;
 
 }

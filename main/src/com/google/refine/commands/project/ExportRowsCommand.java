@@ -38,13 +38,16 @@ import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.Writer;
 import java.util.Enumeration;
+import java.util.Map;
 import java.util.Properties;
 
 import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.apache.http.HttpStatus;
+import com.google.common.net.PercentEscaper;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.hc.core5.http.HttpStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,19 +56,17 @@ import com.google.refine.browsing.Engine;
 import com.google.refine.commands.Command;
 import com.google.refine.exporters.CsvExporter;
 import com.google.refine.exporters.Exporter;
+import com.google.refine.exporters.ExporterException;
 import com.google.refine.exporters.ExporterRegistry;
 import com.google.refine.exporters.StreamExporter;
 import com.google.refine.exporters.WriterExporter;
-import com.google.refine.exporters.sql.SqlExporterException;
 import com.google.refine.model.Project;
 
 public class ExportRowsCommand extends Command {
-    private  static final Logger logger = LoggerFactory.getLogger("ExportRowsCommand");
-    
-	/**
-	 * This command uses POST but is left CSRF-unprotected as it does not incur a state change.
-	 */
 
+    private static final Logger logger = LoggerFactory.getLogger("ExportRowsCommand");
+
+    @Deprecated(since = "3.9")
     @SuppressWarnings("unchecked")
     static public Properties getRequestParameters(HttpServletRequest request) {
         Properties options = new Properties();
@@ -81,64 +82,83 @@ public class ExportRowsCommand extends Command {
     @Override
     public void doPost(HttpServletRequest request, HttpServletResponse response)
             throws ServletException, IOException {
+        // This command triggers evaluation expression and therefore requires CSRF-protection
+        if (!hasValidCSRFToken(request)) {
+            respondCSRFError(response);
+            return;
+        }
 
         ProjectManager.singleton.setBusy(true);
-       
+
         try {
             Project project = getProject(request);
             Engine engine = getEngine(request, project);
-            Properties params = getRequestParameters(request);
-            
-            String format = params.getProperty("format");
+            Map<String, String> params = getParameters(request);
+
+            String format = params.get("format");
             Exporter exporter = ExporterRegistry.getExporter(format);
             if (exporter == null) {
                 exporter = new CsvExporter('\t');
             }
-            
-            String contentType = params.getProperty("contentType");
-            if (contentType == null) {
-                contentType = exporter.getContentType();
-            }
-            response.setHeader("Content-Type", contentType);
 
-            String preview = params.getProperty("preview");
+            response.setHeader("Content-Type", exporter.getContentType());
+            // in case the content-type is text/html, to avoid XSS attacks
+            response.setHeader("Content-Security-Policy", "script-src 'none'; connect-src 'none'");
+
+            String preview = params.get("preview");
             if (!"true".equals(preview)) {
                 String path = request.getPathInfo();
                 String filename = path.substring(path.lastIndexOf('/') + 1);
-                response.setHeader("Content-Disposition", "attachment; filename=" + filename);
+                String userAgent = request.getHeader("User-Agent");
+                if (userAgent != null && userAgent.contains("Safari/") && !userAgent.contains("Chrome/")
+                        && !userAgent.contains("Chromium/")) {
+                    // Safari doesn't support rfc5897 and just wants straight UTF-8, but strip any controls to avoid
+                    // complaints about potential request/response splitting attacks
+                    response.setHeader("Content-Disposition", "attachment; filename=" + filename.replaceAll("\\p{Cntrl}", ""));
+                } else {
+                    // We use the full suite of rc5987 safe characters even though some of them might not make sense
+                    // in a filename. The browser will drop any unsafe characters before saving the file.
+                    PercentEscaper escaper = new PercentEscaper("!#$&+-.^_`|~", false);
+                    // Fallback printable ASCII filename in case browser doesn't understand filename*
+                    // (percent encoded, just in case)
+                    String asciiFilename = escaper.escape(StringUtils.stripAccents(filename).replaceAll("[^ -~]", " "));
+                    String rfc5987Filename = escaper.escape(filename);
+                    response.setHeader("Content-Disposition",
+                            "attachment; filename=" + asciiFilename + "; filename*=UTF-8' '" + rfc5987Filename);
+                }
             }
-            
+
             if (exporter instanceof WriterExporter) {
-                String encoding = params.getProperty("encoding");
-                
+                String encoding = params.get("encoding");
+
                 response.setCharacterEncoding(encoding != null ? encoding : "UTF-8");
-                Writer writer = encoding == null ?
-                    response.getWriter() :
-                    new OutputStreamWriter(response.getOutputStream(), encoding);
-                
+                Writer writer = encoding == null ? response.getWriter() : new OutputStreamWriter(response.getOutputStream(), encoding);
+
                 ((WriterExporter) exporter).export(project, params, engine, writer);
                 writer.close();
-            }
-            else if (exporter instanceof StreamExporter) {
+            } else if (exporter instanceof StreamExporter) {
                 response.setCharacterEncoding("UTF-8");
-                
+
                 OutputStream stream = response.getOutputStream();
                 ((StreamExporter) exporter).export(project, params, engine, stream);
                 stream.close();
-//          } else if (exporter instanceof UrlExporter) {
-//              ((UrlExporter) exporter).export(project, options, engine);
-                
             } else {
                 // TODO: Should this use ServletException instead of respondException?
                 respondException(response, new RuntimeException("Unknown exporter type"));
             }
         } catch (Exception e) {
-            // Use generic error handling rather than our JSON handling
+            // Restore headers and use generic error handling rather than our JSON handling
+            response.setContentType("text/html; charset=utf-8");
+            response.setHeader("Content-Disposition", "inline");
             logger.info("error:{}", e.getMessage());
-            if (e instanceof SqlExporterException) {
+            // It's something semi-expected so return an abbreviated error message
+            if (e instanceof ExporterException) {
                 response.sendError(HttpStatus.SC_BAD_REQUEST, e.getMessage());
+            } else {
+                // This will return an HTML error page with a full stack trace, which is unsightly, but informative when
+                // we hit unexpected errors
+                throw new ServletException(e);
             }
-            throw new ServletException(e);
         } finally {
             ProjectManager.singleton.setBusy(false);
         }

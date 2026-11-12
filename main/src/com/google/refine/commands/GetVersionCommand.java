@@ -40,11 +40,13 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.RefineServlet;
 
 public class GetVersionCommand extends Command {
 
     protected class VersionResponse {
+
         @JsonProperty("version")
         public String version = RefineServlet.VERSION;
         @JsonProperty("revision")
@@ -60,8 +62,11 @@ public class GetVersionCommand extends Command {
         @JsonProperty("java_runtime_name")
         public String java_runtime_name = System.getProperty("java.runtime.name", "?");
         @JsonProperty("java_runtime_version")
-        // public String java_runtime_version = Runtime.getRuntime().version(); // Java 9 or later
-        public String java_runtime_version = System.getProperty("java.runtime.version", "?");
+        public String java_runtime_version = Runtime.getRuntime().version().toString();
+        @JsonProperty("display_new_version_notice")
+        public String display_new_version_notice = System.getProperty("refine.display.new.version.notice");
+        @JsonProperty("module_names")
+        public String[] modules = servlet.getModuleNames();
     }
 
     @Override

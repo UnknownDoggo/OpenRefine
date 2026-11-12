@@ -24,37 +24,73 @@
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  ******************************************************************************/
+
 package com.google.refine.browsing.facets;
 
-import java.io.IOException;
+import static org.testng.Assert.assertEquals;
 
-import org.testng.annotations.Test;
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.Collections;
+import java.util.Map;
+import java.util.Optional;
 
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+
 import com.google.refine.RefineTest;
 import com.google.refine.browsing.Engine;
-import com.google.refine.browsing.facets.RangeFacet;
 import com.google.refine.browsing.facets.RangeFacet.RangeFacetConfig;
-import com.google.refine.model.Cell;
+import com.google.refine.expr.MetaParser;
+import com.google.refine.grel.Parser;
 import com.google.refine.model.Project;
 import com.google.refine.util.ParsingUtilities;
 import com.google.refine.util.TestUtils;
 
 public class RangeFacetTests extends RefineTest {
-    public static String configJson = "{\n" + 
-            "          \"selectNumeric\": true,\n" + 
-            "          \"expression\": \"value\",\n" + 
-            "          \"selectBlank\": true,\n" + 
-            "          \"selectNonNumeric\": true,\n" + 
-            "          \"selectError\": true,\n" + 
-            "          \"name\": \"my column\",\n" + 
-            "          \"from\": -30,\n" + 
-            "          \"to\": 90,\n" + 
-            "          \"type\": \"range\",\n" + 
-            "          \"columnName\": \"my column\"\n" + 
+
+    public static String configJson = "{\n" +
+            "          \"selectNumeric\": true,\n" +
+            "          \"expression\": \"value\",\n" +
+            "          \"selectBlank\": true,\n" +
+            "          \"selectNonNumeric\": true,\n" +
+            "          \"selectError\": true,\n" +
+            "          \"name\": \"my column\",\n" +
+            "          \"from\": -30,\n" +
+            "          \"to\": 90,\n" +
+            "          \"type\": \"range\",\n" +
+            "          \"columnName\": \"my column\"\n" +
             "        }";
-    
+
+    public static String configJsonWithParseError = "{\n" +
+            "          \"selectNumeric\": true,\n" +
+            "          \"expression\": \"foo(\",\n" +
+            "          \"selectBlank\": true,\n" +
+            "          \"selectNonNumeric\": true,\n" +
+            "          \"selectError\": true,\n" +
+            "          \"name\": \"my column\",\n" +
+            "          \"from\": -30,\n" +
+            "          \"to\": 90,\n" +
+            "          \"type\": \"range\",\n" +
+            "          \"columnName\": \"my column\"\n" +
+            "        }";
+
+    public static String configJsonRenamed = "{\n" +
+            "          \"selectNumeric\": true,\n" +
+            "          \"expression\": \"grel:value\",\n" +
+            "          \"selectBlank\": true,\n" +
+            "          \"selectNonNumeric\": true,\n" +
+            "          \"selectError\": true,\n" +
+            "          \"name\": \"new column\",\n" +
+            "          \"from\": -30,\n" +
+            "          \"to\": 90,\n" +
+            "          \"type\": \"range\",\n" +
+            "          \"columnName\": \"new column\"\n" +
+            "        }";
+
     public static String facetJson = "{"
             + "\"name\":\"my column\","
             + "\"expression\":\"value\","
@@ -74,27 +110,56 @@ public class RangeFacetTests extends RefineTest {
             + "\"nonNumericCount\":1,"
             + "\"blankCount\":0,"
             + "\"errorCount\":0}";
-    
+
+    @BeforeMethod
+    public void registerGRELParser() {
+        MetaParser.registerLanguageParser("grel", "GREL", Parser.grelParser, "value");
+    }
+
+    @AfterMethod
+    public void unregisterGRELParser() {
+        MetaParser.unregisterLanguageParser("grel");
+    }
+
     @Test
     public void serializeRangeFacetConfig() throws JsonParseException, JsonMappingException, IOException {
         RangeFacetConfig config = ParsingUtilities.mapper.readValue(configJson, RangeFacetConfig.class);
         TestUtils.isSerializedTo(config, configJson);
     }
-    
+
     @Test
     public void serializeRangeFacet() throws JsonParseException, JsonMappingException, IOException {
-        Project project = createCSVProject("my column\n"
-                + "89.2\n"
-                + "-45.9\n"
-                + "blah\n"
-                + "0.4\n");
-        project.rows.get(0).cells.set(0, new Cell(89.2, null));
-        project.rows.get(1).cells.set(0, new Cell(-45.9, null));
-        project.rows.get(3).cells.set(0, new Cell(0.4, null));
+        Project project = createProject(
+                new String[] { "my column" },
+                new Serializable[][] {
+                        { 89.2 },
+                        { -45.9 },
+                        { "blah" },
+                        { 0.4 }
+                });
         Engine engine = new Engine(project);
         RangeFacetConfig config = ParsingUtilities.mapper.readValue(configJson, RangeFacetConfig.class);
         RangeFacet facet = config.apply(project);
         facet.computeChoices(project, engine.getAllFilteredRows());
         TestUtils.isSerializedTo(facet, facetJson);
+    }
+
+    @Test
+    public void testColumnDependencies() throws Exception {
+        RangeFacetConfig facetConfig = ParsingUtilities.mapper.readValue(configJson, RangeFacetConfig.class);
+        assertEquals(facetConfig.getColumnDependencies(), Optional.of(Collections.singleton("my column")));
+    }
+
+    @Test
+    public void testColumnDependenciesWithError() throws Exception {
+        RangeFacetConfig facetConfig = ParsingUtilities.mapper.readValue(configJsonWithParseError, RangeFacetConfig.class);
+        assertEquals(facetConfig.getColumnDependencies(), Optional.of(Collections.emptySet()));
+    }
+
+    @Test
+    public void testRenameColumnDependencies() throws Exception {
+        RangeFacetConfig facetConfig = ParsingUtilities.mapper.readValue(configJson, RangeFacetConfig.class);
+        FacetConfig renamed = facetConfig.renameColumnDependencies(Map.of("my column", "new column"));
+        TestUtils.isSerializedTo(renamed, configJsonRenamed);
     }
 }

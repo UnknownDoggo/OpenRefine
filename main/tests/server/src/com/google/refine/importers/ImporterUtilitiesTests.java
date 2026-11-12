@@ -48,28 +48,30 @@ import org.testng.annotations.BeforeTest;
 import org.testng.annotations.Test;
 
 import com.google.refine.RefineTest;
+import com.google.refine.messages.OpenRefineMessage;
+import com.google.refine.model.*;
 import com.google.refine.model.Cell;
+import com.google.refine.model.Column;
 import com.google.refine.model.Project;
 import com.google.refine.model.Row;
-import com.google.refine.model.Column;
 
 public class ImporterUtilitiesTests extends RefineTest {
-    
+
     @Override
     @BeforeTest
     public void init() {
         logger = LoggerFactory.getLogger(this.getClass());
     }
 
-    @Test(enabled=false)
-    public void parseCellValueWithText(){
+    @Test(enabled = false)
+    public void parseCellValueWithText() {
         String END_QUOTES_SHOULD_BE_RETAINED = "\"To be\" is almost always followed by \"or not to be\"";
         String response = (String) ImporterUtilities.parseCellValue(END_QUOTES_SHOULD_BE_RETAINED);
         Assert.assertEquals(response, END_QUOTES_SHOULD_BE_RETAINED);
     }
 
     @Test
-    public void getIntegerOption(){
+    public void getIntegerOption() {
         Properties options = mock(Properties.class);
         when(options.containsKey("testInteger")).thenReturn(true);
         when(options.getProperty("testInteger")).thenReturn("5");
@@ -80,7 +82,7 @@ public class ImporterUtilitiesTests extends RefineTest {
     }
 
     @Test
-    public void getIntegerOptionReturnsDefaultOnError(){
+    public void getIntegerOptionReturnsDefaultOnError() {
         Properties options = mock(Properties.class);
         when(options.containsKey("testInteger")).thenReturn(true);
         when(options.getProperty("testInteger")).thenReturn("notAnInteger");
@@ -91,9 +93,8 @@ public class ImporterUtilitiesTests extends RefineTest {
     }
 
     @Test
-    public void appendColumnName(){
+    public void appendColumnName() {
         List<String> columnNames = new ArrayList<String>();
-
 
         ImporterUtilities.appendColumnName(columnNames, 0, "foo");
         ImporterUtilities.appendColumnName(columnNames, 1, "bar");
@@ -103,7 +104,7 @@ public class ImporterUtilitiesTests extends RefineTest {
     }
 
     @Test
-    public void appendColumnNameFromMultipleRows(){
+    public void appendColumnNameFromMultipleRows() {
         List<String> columnNames = new ArrayList<String>();
 
         ImporterUtilities.appendColumnName(columnNames, 0, "foo");
@@ -113,7 +114,7 @@ public class ImporterUtilitiesTests extends RefineTest {
     }
 
     @Test
-    public void ensureColumnsInRowExist(){
+    public void ensureColumnsInRowExist() {
         String VALUE_1 = "value1";
         String VALUE_2 = "value2";
         Row row = new Row(2);
@@ -129,14 +130,13 @@ public class ImporterUtilitiesTests extends RefineTest {
     }
 
     @Test
-    public void ensureColumnsInRowExistDoesExpand(){
+    public void ensureColumnsInRowExistDoesExpand() {
         Row row = new Row(4);
-        for(int i = 1; i < 5; i++) {
+        for (int i = 1; i < 5; i++) {
             row.cells.add(new Cell("value" + i, null));
         }
 
         ArrayList<String> columnNames = new ArrayList<String>(2);
-
 
         ImporterUtilities.ensureColumnsInRowExist(columnNames, row);
 
@@ -145,20 +145,20 @@ public class ImporterUtilitiesTests extends RefineTest {
     }
 
     @Test
-    public void setupColumns(){
+    public void setupColumns() {
         Project project = new Project();
         List<String> columnNames = new ArrayList<String>();
         columnNames.add("col1");
         columnNames.add("col2");
         columnNames.add("");
         ImporterUtilities.setupColumns(project, columnNames);
-        Assert.assertEquals( project.columnModel.columns.get(0).getName(), "col1" );
-        Assert.assertEquals( project.columnModel.columns.get(1).getName(), "col2" );
-        Assert.assertEquals( project.columnModel.columns.get(2).getName(), "Column");
+        Assert.assertEquals(project.columnModel.columns.get(0).getName(), "col1");
+        Assert.assertEquals(project.columnModel.columns.get(1).getName(), "col2");
+        Assert.assertEquals(project.columnModel.columns.get(2).getName(), "Column");
     }
 
     @Test
-    public void testGetOrAllocateColumn(){
+    public void testGetOrAllocateColumn() {
         Project project = new Project();
         List<String> columnNames = new ArrayList<String>();
         columnNames.add("Column 1");
@@ -166,17 +166,47 @@ public class ImporterUtilitiesTests extends RefineTest {
         columnNames.add("Column 3");
         // Set up column names in project
         ImporterUtilities.setupColumns(project, columnNames);
-        Assert.assertEquals( project.columnModel.columns.get(0).getName(), "Column 1" );
-        Assert.assertEquals( project.columnModel.columns.get(1).getName(), "Column 2" );
-        Assert.assertEquals( project.columnModel.columns.get(2).getName(), "Column 3");
+        Assert.assertEquals(project.columnModel.columns.get(0).getName(), "Column 1");
+        Assert.assertEquals(project.columnModel.columns.get(1).getName(), "Column 2");
+        Assert.assertEquals(project.columnModel.columns.get(2).getName(), "Column 3");
 
         // This will mock the situation of importing another sheet from the same file.
         // Expect newColumnNames can be updated using column names.
         List<String> newColumnNames = new ArrayList<String>();
         Column c0 = ImporterUtilities.getOrAllocateColumn(project, newColumnNames, 0, false);
         Column c1 = ImporterUtilities.getOrAllocateColumn(project, newColumnNames, 1, false);
-        Assert.assertEquals(c0.getName(), "Column 1");
-        Assert.assertEquals(c1.getName(), "Column 2");
+        Assert.assertEquals(c0.getName(), OpenRefineMessage.importer_utilities_column() + " 1");
+        Assert.assertEquals(c1.getName(), OpenRefineMessage.importer_utilities_column() + " 2");
         Assert.assertEquals(newColumnNames.size(), 2);
+    }
+
+    @Test
+    public void testDeleteEmptyColumns() throws ModelException {
+        Project project = new Project();
+        // Set up column names in project
+        List<String> columnNames = new ArrayList<>();
+        List<Integer> columnsWithNoData = new ArrayList<>();
+        columnNames.add("Column 1");
+
+        columnNames.add("Column 2");
+        columnsWithNoData.add(1);
+
+        columnNames.add("Column 3");
+
+        columnNames.add("Column 4");
+        columnsWithNoData.add(3);
+
+        columnNames.add("Column 5");
+
+        ImporterUtilities.setupColumns(project, columnNames);
+        Assert.assertEquals(project.columnModel.columns.get(0).getName(), "Column 1");
+        Assert.assertEquals(project.columnModel.columns.get(1).getName(), "Column 2");
+        Assert.assertEquals(project.columnModel.columns.get(2).getName(), "Column 3");
+
+        // This will mock the situation of deleting empty columns(col2&col4)
+        ImporterUtilities.deleteColumns(project, columnsWithNoData);
+        Assert.assertEquals(project.columnModel.columns.get(0).getName(), "Column 1");
+        Assert.assertEquals(project.columnModel.columns.get(1).getName(), "Column 3");
+        Assert.assertEquals(project.columnModel.columns.get(2).getName(), "Column 5");
     }
 }

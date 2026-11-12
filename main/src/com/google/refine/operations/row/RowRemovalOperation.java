@@ -33,56 +33,78 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.operations.row;
 
- import java.util.ArrayList;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import com.google.refine.browsing.Engine;
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.browsing.FilteredRows;
 import com.google.refine.browsing.RowVisitor;
 import com.google.refine.history.HistoryEntry;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.Row;
 import com.google.refine.model.changes.RowRemovalChange;
 import com.google.refine.operations.EngineDependentOperation;
+import com.google.refine.operations.OperationDescription;
 
 public class RowRemovalOperation extends EngineDependentOperation {
+
     @JsonCreator
     public RowRemovalOperation(
-            @JsonProperty("engineConfig")
-            EngineConfig engineConfig) {
+            @JsonProperty("engineConfig") EngineConfig engineConfig) {
         super(engineConfig);
     }
 
     @Override
     protected String getBriefDescription(Project project) {
-        return "Remove rows";
+        return OperationDescription.row_removal_brief();
     }
 
-   @Override
-protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) throws Exception {
+    @Override
+    protected Optional<Set<String>> getColumnDependenciesWithoutEngine() {
+        return Optional.of(Set.of());
+    }
+
+    @JsonIgnore
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        return Optional.of(ColumnsDiff.empty());
+    }
+
+    @Override
+    public RowRemovalOperation renameColumns(Map<String, String> newColumnNames) {
+        return new RowRemovalOperation(_engineConfig.renameColumnDependencies(newColumnNames));
+    }
+
+    @Override
+    protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) throws Exception {
         Engine engine = createEngine(project);
-        
+
         List<Integer> rowIndices = new ArrayList<Integer>();
-        
+
         FilteredRows filteredRows = engine.getAllFilteredRows();
         filteredRows.accept(project, createRowVisitor(project, rowIndices));
-        
+
         return new HistoryEntry(
-            historyEntryID,
-            project, 
-            "Remove " + rowIndices.size() + " rows", 
-            this, 
-            new RowRemovalChange(rowIndices)
-        );
+                historyEntryID,
+                project,
+                "Remove " + rowIndices.size() + " rows",
+                this,
+                new RowRemovalChange(rowIndices));
     }
 
     protected RowVisitor createRowVisitor(Project project, List<Integer> rowIndices) throws Exception {
         return new RowVisitor() {
+
             List<Integer> rowIndices;
-            
+
             public RowVisitor init(List<Integer> rowIndices) {
                 this.rowIndices = rowIndices;
                 return this;
@@ -101,7 +123,7 @@ protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) 
             @Override
             public boolean visit(Project project, int rowIndex, Row row) {
                 rowIndices.add(rowIndex);
-                
+
                 return false;
             }
         }.init(rowIndices);

@@ -33,43 +33,100 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.operations.column;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.commons.lang.Validate;
+
 import com.google.refine.history.HistoryEntry;
 import com.google.refine.model.AbstractOperation;
+import com.google.refine.model.ColumnsDiff;
 import com.google.refine.model.Project;
 import com.google.refine.model.changes.ColumnReorderChange;
+import com.google.refine.operations.OperationDescription;
 
 public class ColumnReorderOperation extends AbstractOperation {
+
+    /// The column names in the order in which they should be after running this operation
     final protected List<String> _columnNames;
-    
+    /// true when the operation should only reorder columns. In this case, any column names
+    /// missing from the column names list will be inserted back in some position. Otherwise,
+    /// they will be deleted.
+    final protected boolean _isPureReorder;
+
     @JsonCreator
     public ColumnReorderOperation(
-            @JsonProperty("columnNames")
-            List<String> columnNames) {
+            @JsonProperty("columnNames") List<String> columnNames,
+            @JsonProperty("isPureReorder") boolean isPureReorder) {
         _columnNames = columnNames;
+        _isPureReorder = isPureReorder;
     }
-    
+
+    @Override
+    public void validate() {
+        Validate.notNull(_columnNames, "Missing column names");
+    }
+
     @JsonProperty("columnNames")
     public List<String> getColumnNames() {
         return _columnNames;
     }
 
-    @Override
-    protected String getBriefDescription(Project project) {
-        return "Reorder columns";
+    @JsonProperty("isPureReorder")
+    public boolean isPureReorder() {
+        return _isPureReorder;
     }
 
-   @Override
-protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) throws Exception {
+    @Override
+    protected String getBriefDescription(Project project) {
+        return OperationDescription.column_reorder_brief();
+    }
+
+    @Override
+    public Optional<Set<String>> getColumnDependencies() {
+        return Optional.of(_columnNames.stream().collect(Collectors.toSet()));
+    }
+
+    @Override
+    public Optional<ColumnsDiff> getColumnsDiff() {
+        if (_isPureReorder) {
+            // all columns are preserved
+            return Optional.of(ColumnsDiff.empty());
+        } else {
+            return Optional.empty(); // we don't know what columns there were before, so we can't diff them
+        }
+    }
+
+    @Override
+    public ColumnReorderOperation renameColumns(Map<String, String> newColumnNames) {
+        return new ColumnReorderOperation(
+                _columnNames.stream().map(name -> newColumnNames.getOrDefault(name, name)).collect(Collectors.toList()),
+                _isPureReorder);
+    }
+
+    @Override
+    protected HistoryEntry createHistoryEntry(Project project, long historyEntryID) throws Exception {
+        List<String> columnNames = new ArrayList<>(_columnNames);
+        if (_isPureReorder) {
+            // make sure all columns present in the project are preserved,
+            // for https://github.com/OpenRefine/OpenRefine/issues/5576
+            for (String columnName : project.columnModel.getColumnNames()) {
+                if (!columnNames.contains(columnName)) {
+                    columnNames.add(columnName);
+                }
+            }
+        }
         return new HistoryEntry(
-            historyEntryID,
-            project, 
-            "Reorder columns", 
-            this, 
-            new ColumnReorderChange(_columnNames)
-        );
+                historyEntryID,
+                project,
+                getBriefDescription(null),
+                this,
+                new ColumnReorderChange(columnNames));
     }
 }

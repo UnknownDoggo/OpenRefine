@@ -39,6 +39,7 @@ import java.util.List;
 import javax.servlet.http.HttpServletRequest;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.commands.EngineDependentCommand;
 import com.google.refine.model.AbstractOperation;
@@ -48,10 +49,11 @@ import com.google.refine.operations.column.ColumnAdditionByFetchingURLsOperation
 import com.google.refine.operations.column.ColumnAdditionByFetchingURLsOperation.HttpHeader;
 
 public class AddColumnByFetchingURLsCommand extends EngineDependentCommand {
+
     @Override
     protected AbstractOperation createOperation(Project project,
-        HttpServletRequest request, EngineConfig engineConfig) throws Exception {
-        
+            HttpServletRequest request, EngineConfig engineConfig) throws Exception {
+
         String baseColumnName = request.getParameter("baseColumnName");
         String urlExpression = request.getParameter("urlExpression");
         String newColumnName = request.getParameter("newColumnName");
@@ -63,16 +65,15 @@ public class AddColumnByFetchingURLsCommand extends EngineDependentCommand {
         List<HttpHeader> headers = Arrays.asList(mapper.readValue(request.getParameter("httpHeaders"), HttpHeader[].class));
 
         return new ColumnAdditionByFetchingURLsOperation(
-            engineConfig, 
-            baseColumnName, 
-            urlExpression,
-            TextTransformOperation.stringToOnError(onError),
-            newColumnName,
-            columnInsertIndex,
-            delay,
-            cacheResponses,
-            headers
-        );
+                engineConfig,
+                baseColumnName,
+                urlExpression,
+                TextTransformOperation.stringToOnError(onError),
+                newColumnName,
+                columnInsertIndex,
+                delay,
+                cacheResponses,
+                headers);
     }
 
 }

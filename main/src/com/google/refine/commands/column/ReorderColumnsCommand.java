@@ -38,6 +38,7 @@ import java.util.List;
 import javax.servlet.http.HttpServletRequest;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.commands.EngineDependentCommand;
 import com.google.refine.model.AbstractOperation;
@@ -46,13 +47,15 @@ import com.google.refine.operations.column.ColumnReorderOperation;
 import com.google.refine.util.ParsingUtilities;
 
 public class ReorderColumnsCommand extends EngineDependentCommand {
-    
+
     @Override
     protected AbstractOperation createOperation(Project project,
             HttpServletRequest request, EngineConfig engineConfig) throws Exception {
-        
+
         String columnNames = request.getParameter("columnNames");
+        String isPureReorder = request.getParameter("isPureReorder");
         return new ColumnReorderOperation(
-                ParsingUtilities.mapper.readValue(columnNames, new TypeReference<List<String>>() {}));
+                ParsingUtilities.mapper.readValue(columnNames, new TypeReference<List<String>>() {
+                }), "true".equals(isPureReorder));
     }
 }

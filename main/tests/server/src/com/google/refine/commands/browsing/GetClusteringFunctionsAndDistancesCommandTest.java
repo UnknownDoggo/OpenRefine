@@ -40,40 +40,42 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.testng.annotations.BeforeMethod;
 import org.testng.annotations.Test;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.google.refine.clustering.binning.KeyerFactory;
+import com.google.refine.clustering.binning.Metaphone3Keyer;
+import com.google.refine.clustering.knn.ApacheLevenshteinDistance;
+import com.google.refine.clustering.knn.DistanceFactory;
 import com.google.refine.commands.Command;
 import com.google.refine.util.JSONUtilities;
 import com.google.refine.util.ParsingUtilities;
 
-
 public class GetClusteringFunctionsAndDistancesCommandTest {
-	
+
     protected HttpServletRequest request = null;
     protected HttpServletResponse response = null;
-	protected StringWriter writer = null;
-	protected Command command = null;
-	
+    protected StringWriter writer = null;
+    protected Command command = null;
+
     @BeforeMethod
-    public void setUp() {
+    public void setUp() throws IOException {
         request = mock(HttpServletRequest.class);
         response = mock(HttpServletResponse.class);
         command = new GetClusteringFunctionsAndDistancesCommand();
         writer = new StringWriter();
-        try {
-            when(response.getWriter()).thenReturn(new PrintWriter(writer));
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        when(response.getWriter()).thenReturn(new PrintWriter(writer));
+
+        DistanceFactory.put("levenshtein", new ApacheLevenshteinDistance());
+        KeyerFactory.put("metaphone3", new Metaphone3Keyer());
     }
-	
+
     @Test
-	public void testGetFunctionsAndKeyers() throws ServletException, IOException {
-    	command.doGet(request, response);
-    	ObjectNode result = ParsingUtilities.mapper.readValue(writer.toString(), ObjectNode.class);
-    	assertTrue(Arrays.asList(JSONUtilities.getStringArray(result, "keyers")).contains("metaphone3"));
-    	assertTrue(Arrays.asList(JSONUtilities.getStringArray(result, "distances")).contains("levenshtein"));
-	}
+    public void testGetFunctionsAndKeyers() throws ServletException, IOException {
+        command.doGet(request, response);
+        ObjectNode result = ParsingUtilities.mapper.readValue(writer.toString(), ObjectNode.class);
+        assertTrue(Arrays.asList(JSONUtilities.getStringArray(result, "keyers")).contains("metaphone3"));
+        assertTrue(Arrays.asList(JSONUtilities.getStringArray(result, "distances")).contains("levenshtein"));
+    }
 }

@@ -1,8 +1,9 @@
 ---
 name: Bug report
+type: bug
 about: Create a report to help us improve OpenRefine
 title: ''
-labels: bug, to be reviewed
+labels: ['Status: Pending Review']
 assignees: ''
 
 ---
@@ -34,7 +35,7 @@ Steps to reproduce the behavior:
 
 ### Datasets
 <!-- If you are allowed and are OK with making your data public, it would be awesome if you can include or attach the data causing the issue or a URL pointing to where the data is.
-If you are concerned about keeping your data private, ping us on our [mailing list](https://groups.google.com/forum/#!forum/openrefine) -->
+If you are concerned about keeping your data private, you can share it selectively by email to developers who work on the issue -->
 
 ### Additional context
 <!-- Add any other context about the problem here. -->

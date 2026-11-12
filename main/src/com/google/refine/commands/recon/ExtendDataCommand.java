@@ -33,7 +33,11 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 package com.google.refine.commands.recon;
 
+import java.util.List;
+
 import javax.servlet.http.HttpServletRequest;
+
+import com.fasterxml.jackson.core.type.TypeReference;
 
 import com.google.refine.browsing.EngineConfig;
 import com.google.refine.commands.EngineDependentCommand;
@@ -41,30 +45,35 @@ import com.google.refine.model.AbstractOperation;
 import com.google.refine.model.Project;
 import com.google.refine.model.recon.ReconciledDataExtensionJob.DataExtensionConfig;
 import com.google.refine.operations.recon.ExtendDataOperation;
+import com.google.refine.util.ParsingUtilities;
 
 public class ExtendDataCommand extends EngineDependentCommand {
+
     @Override
     protected AbstractOperation createOperation(Project project,
             HttpServletRequest request, EngineConfig engineConfig) throws Exception {
-        
+
         String baseColumnName = request.getParameter("baseColumnName");
         int columnInsertIndex = Integer.parseInt(request.getParameter("columnInsertIndex"));
         String endpoint = request.getParameter("endpoint");
         String identifierSpace = request.getParameter("identifierSpace");
         String schemaSpace = request.getParameter("schemaSpace");
-        
+
         String jsonString = request.getParameter("extension");
         DataExtensionConfig extension = DataExtensionConfig.reconstruct(jsonString);
-        
+        String columnsString = request.getParameter("resultColumns");
+        List<String> resultColumnNames = ParsingUtilities.mapper.readValue(columnsString, new TypeReference<List<String>>() {
+        });
+
         return new ExtendDataOperation(
-            engineConfig, 
-            baseColumnName, 
-            endpoint,
-            identifierSpace,
-            schemaSpace,
-            extension,
-            columnInsertIndex
-        );
+                engineConfig,
+                baseColumnName,
+                endpoint,
+                identifierSpace,
+                schemaSpace,
+                extension,
+                columnInsertIndex,
+                resultColumnNames);
     }
 
 }

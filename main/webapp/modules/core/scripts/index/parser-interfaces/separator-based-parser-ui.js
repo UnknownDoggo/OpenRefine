@@ -62,7 +62,7 @@ Refine.SeparatorBasedParserUI.prototype.confirmReadyToCreateProject = function()
 
 Refine.SeparatorBasedParserUI.prototype.getOptions = function() {
   var options = {
-    encoding: $.trim(this._optionContainerElmts.encodingInput[0].value)
+    encoding: jQueryTrim(this._optionContainerElmts.encodingInput[0].value)
   };
   
   switch (this._optionContainer.find("input[name='column-separator']:checked")[0].value) {
@@ -78,7 +78,7 @@ Refine.SeparatorBasedParserUI.prototype.getOptions = function() {
 
   var parseIntDefault = function(s, def) {
     try {
-      var n = parseInt(s,10);
+      var n = parseInt(s);
       if (!isNaN(n)) {
         return n;
       }
@@ -108,6 +108,7 @@ Refine.SeparatorBasedParserUI.prototype.getOptions = function() {
     options.limit = -1;
   }
   options.storeBlankRows = this._optionContainerElmts.storeBlankRowsCheckbox[0].checked;
+  options.storeBlankColumns = this._optionContainerElmts.storeBlankColumnsCheckbox[0].checked;
 
   options.guessCellValueTypes = this._optionContainerElmts.guessCellValueTypesCheckbox[0].checked;
   options.processQuotes = this._optionContainerElmts.processQuoteMarksCheckbox[0].checked;
@@ -119,6 +120,8 @@ Refine.SeparatorBasedParserUI.prototype.getOptions = function() {
   options.includeFileSources = this._optionContainerElmts.includeFileSourcesCheckbox[0].checked;
   options.includeArchiveFileName = this._optionContainerElmts.includeArchiveFileCheckbox[0].checked;
   options.trimStrings = this._optionContainerElmts.trimStringsCheckbox[0].checked;
+
+  options.disableAutoPreview = this._optionContainerElmts.disableAutoPreviewCheckbox[0].checked;
   
   if (this._optionContainerElmts.columnNamesCheckbox[0].checked) {
       var columnNames = this._optionContainerElmts.columnNamesInput.val();
@@ -133,19 +136,20 @@ Refine.SeparatorBasedParserUI.prototype.getOptions = function() {
 Refine.SeparatorBasedParserUI.prototype._initialize = function() {
   var self = this;
 
-  this._optionContainer.unbind().empty().html(
+  this._optionContainer.off().empty().html(
       DOM.loadHTML("core", "scripts/index/parser-interfaces/separator-based-parser-ui.html"));
   this._optionContainerElmts = DOM.bind(this._optionContainer);
-  this._optionContainerElmts.previewButton.click(function() { self._updatePreview(); });
+  this._optionContainerElmts.previewButton.on('click',function() { self._updatePreview(); });
   
   this._optionContainerElmts.previewButton.html($.i18n('core-buttons/update-preview'));
+  $('#or-disable-auto-preview').text($.i18n('core-index-parser/disable-auto-preview'));
   $('#or-import-encoding').html($.i18n('core-index-import/char-encoding'));
   $('#or-import-colsep').html($.i18n('core-index-parser/col-separated-by'));
   $('#or-import-commas').html($.i18n('core-index-parser/commas'));
   $('#or-import-tabs').html($.i18n('core-index-parser/tabs'));
   $('#or-import-custom').html($.i18n('core-index-parser/custom'));
   $('#or-import-escape').html($.i18n('core-index-parser/escape'));
-  $('#or-import-columnNames').html($.i18n('core-index-parser/column-names-label') + ':');
+  $('#or-import-columnNames').html($.i18n('core-index-parser/column-names-label'));
   $('#or-import-optional').html($.i18n('core-index-parser/column-names-optional'));
   $('#or-import-trim').html($.i18n('core-index-parser/trim'));
   
@@ -163,13 +167,14 @@ Refine.SeparatorBasedParserUI.prototype._initialize = function() {
   $('#or-import-quote').html($.i18n('core-index-parser/use-quote'));
   $('#or-import-quote-character').html($.i18n('core-index-parser/quote-delimits-cells'));
   $('#or-import-blank').text($.i18n('core-index-parser/store-blank'));
+  $('#or-import-blank-columns').text($.i18n('core-index-parser/store-blank-columns'));
   $('#or-import-null').text($.i18n('core-index-parser/store-nulls'));
   $('#or-import-source').html($.i18n('core-index-parser/store-source'));
   $('#or-import-archive').html($.i18n('core-index-parser/store-archive'));
 
   this._optionContainerElmts.encodingInput
     .val(this._config.encoding || '')
-    .click(function() {
+    .on('click',function() {
       Encoding.selectEncoding($(this), function() {
         self._updatePreview();
       });
@@ -225,7 +230,9 @@ Refine.SeparatorBasedParserUI.prototype._initialize = function() {
   if (this._config.storeBlankRows) {
     this._optionContainerElmts.storeBlankRowsCheckbox.prop("checked", true);
   }
-
+  if (this._config.storeBlankColumns) {
+    this._optionContainerElmts.storeBlankColumnsCheckbox.prop("checked", true);
+  }
   if (this._config.guessCellValueTypes) {
     this._optionContainerElmts.guessCellValueTypesCheckbox.prop("checked", true);
   }
@@ -247,12 +254,21 @@ Refine.SeparatorBasedParserUI.prototype._initialize = function() {
     this._optionContainerElmts.trimStringsCheckbox.prop('checked', false);
   }
 
+  if (this._config.disableAutoPreview) {
+    this._optionContainerElmts.disableAutoPreviewCheckbox.prop('checked', true);
+  }
+
+  // If disableAutoPreviewCheckbox is not checked, we will schedule an automatic update
   var onChange = function() {
-    self._scheduleUpdatePreview();
+    if (!self._optionContainerElmts.disableAutoPreviewCheckbox[0].checked)
+    {
+        self._scheduleUpdatePreview();
+    }
   };
-  this._optionContainer.find("input").bind("change", onChange);
-  this._optionContainer.find("select").bind("change", onChange);
-  this._optionContainerElmts.columnNamesInput.bind("keyup",onChange);
+
+  this._optionContainer.find("input").on("change", onChange);
+  this._optionContainer.find("select").on("change", onChange);
+  this._optionContainerElmts.columnNamesInput.on("keyup",onChange);
 };
 
 Refine.SeparatorBasedParserUI.prototype._scheduleUpdatePreview = function() {
@@ -278,7 +294,7 @@ Refine.SeparatorBasedParserUI.prototype._updatePreview = function() {
       self._controller.getPreviewData(function(projectData) {
         self._progressContainer.hide();
 
-        new Refine.PreviewTable(projectData, self._dataContainer.unbind().empty());
+        new Refine.PreviewTable(projectData, self._dataContainer.off().empty());
       });
     }
   });
